@@ -1,10 +1,11 @@
 package com.banksecurity.backend.service.impl;
 
+import com.banksecurity.backend.config.StorageConfig;
 import com.banksecurity.backend.exception.BadRequestException;
 import com.banksecurity.backend.exception.ResourceNotFoundException;
 import com.banksecurity.backend.service.StorageService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
@@ -15,51 +16,26 @@ import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class StorageServiceImpl implements StorageService {
 
-    @Value("${storage.images-path:./storage/images}")
-    private String imagesPath;
-
-    @Value("${storage.videos-path:./storage/videos}")
-    private String videosPath;
-
-    @Value("${storage.max-image-size:10485760}")
-    private long maxImageSize;
-
-    @Value("${storage.max-video-size:104857600}")
-    private long maxVideoSize;
+    private final StorageConfig storageConfig;
 
     @Override
     public String saveImage(MultipartFile file) throws IOException {
-        validateImage(file);
-
-        String filename = generateUniqueFilename(file.getOriginalFilename());
-        Path targetPath = Paths.get(imagesPath).resolve(filename);
-
-        Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
-
-        log.info("Image sauvegardée: {}", targetPath);
-        return targetPath.toString();
+        return storageConfig.saveImage(file);
     }
 
     @Override
     public String saveVideo(MultipartFile file) throws IOException {
-        validateVideo(file);
-
-        String filename = generateUniqueFilename(file.getOriginalFilename());
-        Path targetPath = Paths.get(videosPath).resolve(filename);
-
-        Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
-
-        log.info("Vidéo sauvegardée: {}", targetPath);
-        return targetPath.toString();
+        return storageConfig.saveVideo(file);
     }
 
     @Override
@@ -69,7 +45,7 @@ public class StorageServiceImpl implements StorageService {
         }
 
         String newFilename = generateUniqueFilename(filename);
-        Path targetPath = Paths.get(imagesPath).resolve(newFilename);
+        Path targetPath = Paths.get(storageConfig.getImagesPath()).resolve(newFilename);
 
         Files.write(targetPath, imageData);
 
@@ -80,7 +56,7 @@ public class StorageServiceImpl implements StorageService {
     @Override
     public Resource loadImage(String filename) {
         try {
-            Path filePath = Paths.get(imagesPath).resolve(filename).normalize();
+            Path filePath = Paths.get(storageConfig.getImagesPath()).resolve(filename).normalize();
             Resource resource = new UrlResource(filePath.toUri());
 
             if (resource.exists() && resource.isReadable()) {
@@ -96,7 +72,7 @@ public class StorageServiceImpl implements StorageService {
     @Override
     public Resource loadVideo(String filename) {
         try {
-            Path filePath = Paths.get(videosPath).resolve(filename).normalize();
+            Path filePath = Paths.get(storageConfig.getVideosPath()).resolve(filename).normalize();
             Resource resource = new UrlResource(filePath.toUri());
 
             if (resource.exists() && resource.isReadable()) {
@@ -111,45 +87,33 @@ public class StorageServiceImpl implements StorageService {
 
     @Override
     public void deleteImage(String filename) {
-        try {
-            Path filePath = Paths.get(imagesPath).resolve(filename).normalize();
-            Files.deleteIfExists(filePath);
-            log.info("Image supprimée: {}", filePath);
-        } catch (IOException e) {
-            log.error("Erreur lors de la suppression de l'image: {}", filename, e);
-        }
+        storageConfig.deleteImage(filename);
     }
 
     @Override
     public void deleteVideo(String filename) {
-        try {
-            Path filePath = Paths.get(videosPath).resolve(filename).normalize();
-            Files.deleteIfExists(filePath);
-            log.info("Vidéo supprimée: {}", filePath);
-        } catch (IOException e) {
-            log.error("Erreur lors de la suppression de la vidéo: {}", filename, e);
-        }
+        storageConfig.deleteVideo(filename);
     }
 
     @Override
     public boolean imageExists(String filename) {
-        Path filePath = Paths.get(imagesPath).resolve(filename).normalize();
+        Path filePath = Paths.get(storageConfig.getImagesPath()).resolve(filename).normalize();
         return Files.exists(filePath);
     }
 
     @Override
     public boolean videoExists(String filename) {
-        Path filePath = Paths.get(videosPath).resolve(filename).normalize();
+        Path filePath = Paths.get(storageConfig.getVideosPath()).resolve(filename).normalize();
         return Files.exists(filePath);
     }
 
     @Override
     public void cleanupExpiredFiles() {
         // Nettoyer les images de plus de 90 jours
-        cleanupDirectory(imagesPath, 90);
+        cleanupDirectory(storageConfig.getImagesPath(), 90);
 
         // Nettoyer les vidéos de plus de 30 jours
-        cleanupDirectory(videosPath, 30);
+        cleanupDirectory(storageConfig.getVideosPath(), 30);
 
         log.info("Nettoyage des fichiers expirés effectué");
     }
@@ -163,57 +127,27 @@ public class StorageServiceImpl implements StorageService {
 
             LocalDateTime cutoff = LocalDateTime.now().minusDays(daysToKeep);
 
-            Files.list(directory)
-                    .filter(Files::isRegularFile)
-                    .forEach(file -> {
-                        try {
-                            LocalDateTime lastModified = Files.getLastModifiedTime(file)
-                                    .toInstant()
-                                    .atZone(java.time.ZoneId.systemDefault())
-                                    .toLocalDateTime();
+            // Utilisation de try-with-resources pour fermer le Stream automatiquement
+            try (Stream<Path> files = Files.list(directory)) {
+                files.filter(Files::isRegularFile)
+                        .forEach(file -> {
+                            try {
+                                LocalDateTime lastModified = Files.getLastModifiedTime(file)
+                                        .toInstant()
+                                        .atZone(java.time.ZoneId.systemDefault())
+                                        .toLocalDateTime();
 
-                            if (lastModified.isBefore(cutoff)) {
-                                Files.deleteIfExists(file);
-                                log.info("Fichier expiré supprimé: {}", file);
+                                if (lastModified.isBefore(cutoff)) {
+                                    Files.deleteIfExists(file);
+                                    log.info("Fichier expiré supprimé: {}", file);
+                                }
+                            } catch (IOException e) {
+                                log.error("Erreur lors de la vérification du fichier: {}", file, e);
                             }
-                        } catch (IOException e) {
-                            log.error("Erreur lors de la vérification du fichier: {}", file, e);
-                        }
-                    });
+                        });
+            }
         } catch (IOException e) {
             log.error("Erreur lors du nettoyage du répertoire: {}", directoryPath, e);
-        }
-    }
-
-    private void validateImage(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new BadRequestException("Fichier image vide");
-        }
-
-        if (file.getSize() > maxImageSize) {
-            throw new BadRequestException("Image trop volumineuse. Taille maximale: " +
-                    (maxImageSize / (1024 * 1024)) + " MB");
-        }
-
-        String contentType = file.getContentType();
-        if (contentType == null || !contentType.startsWith("image/")) {
-            throw new BadRequestException("Type de fichier non supporté pour une image: " + contentType);
-        }
-    }
-
-    private void validateVideo(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new BadRequestException("Fichier vidéo vide");
-        }
-
-        if (file.getSize() > maxVideoSize) {
-            throw new BadRequestException("Vidéo trop volumineuse. Taille maximale: " +
-                    (maxVideoSize / (1024 * 1024)) + " MB");
-        }
-
-        String contentType = file.getContentType();
-        if (contentType == null || !contentType.startsWith("video/")) {
-            throw new BadRequestException("Type de fichier non supporté pour une vidéo: " + contentType);
         }
     }
 

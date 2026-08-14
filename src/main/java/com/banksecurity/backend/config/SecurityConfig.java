@@ -2,7 +2,6 @@ package com.banksecurity.backend.config;
 
 import com.banksecurity.backend.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -19,8 +18,9 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import java.util.Arrays;
-import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -28,14 +28,22 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    @Autowired
-    private JwtAuthenticationFilter jwtAuthenticationFilter;
+    // Constantes pour les rôles
+    private static final String ROLE_ADMIN = "ADMIN";
+    private static final String ROLE_MANAGER = "MANAGER";
+    private static final String ROLE_SECURITY = "SECURITY";
+
+    // Constantes pour les messages d'erreur
+    private static final String JSON_UNAUTHORIZED = "{\"status\":401,\"error\":\"Non autorisé\",\"message\":\"Authentification requise\"}";
+    private static final String JSON_FORBIDDEN = "{\"status\":403,\"error\":\"Accès refusé\",\"message\":\"Permissions insuffisantes\"}";
+
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
     /**
      * Configuration de la chaîne de filtres de sécurité
      */
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http) {
         http
                 // Désactiver CSRF car nous utilisons JWT
                 .csrf(csrf -> csrf.disable())
@@ -59,14 +67,14 @@ public class SecurityConfig {
                         .requestMatchers("/ws/**").permitAll()
 
                         // Endpoints d'administration
-                        .requestMatchers("/users/**").hasRole("ADMIN")
-                        .requestMatchers("/cameras/**").hasAnyRole("ADMIN", "MANAGER")
-                        .requestMatchers("/zones/**").hasAnyRole("ADMIN", "MANAGER")
-                        .requestMatchers("/rules/**").hasAnyRole("ADMIN", "MANAGER")
+                        .requestMatchers("/users/**").hasRole(ROLE_ADMIN)
+                        .requestMatchers("/cameras/**").hasAnyRole(ROLE_ADMIN, ROLE_MANAGER)
+                        .requestMatchers("/zones/**").hasAnyRole(ROLE_ADMIN, ROLE_MANAGER)
+                        .requestMatchers("/rules/**").hasAnyRole(ROLE_ADMIN, ROLE_MANAGER)
 
                         // Endpoints de sécurité
-                        .requestMatchers("/alerts/**").hasAnyRole("ADMIN", "SECURITY", "MANAGER")
-                        .requestMatchers("/dashboard/**").hasAnyRole("ADMIN", "SECURITY", "MANAGER")
+                        .requestMatchers("/alerts/**").hasAnyRole(ROLE_ADMIN, ROLE_SECURITY, ROLE_MANAGER)
+                        .requestMatchers("/dashboard/**").hasAnyRole(ROLE_ADMIN, ROLE_SECURITY, ROLE_MANAGER)
 
                         // Tous les autres endpoints nécessitent une authentification
                         .anyRequest().authenticated()
@@ -77,23 +85,37 @@ public class SecurityConfig {
 
                 // Configuration de la gestion des exceptions
                 .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint((request, response, authException) -> {
-                            response.setStatus(401);
-                            response.setContentType("application/json");
-                            response.getWriter().write(
-                                    "{\"status\":401,\"error\":\"Non autorisé\",\"message\":\"Authentification requise\"}"
-                            );
-                        })
-                        .accessDeniedHandler((request, response, accessDeniedException) -> {
-                            response.setStatus(403);
-                            response.setContentType("application/json");
-                            response.getWriter().write(
-                                    "{\"status\":403,\"error\":\"Accès refusé\",\"message\":\"Permissions insuffisantes\"}"
-                            );
-                        })
+                        .authenticationEntryPoint(this::handleAuthenticationEntryPoint)
+                        .accessDeniedHandler(this::handleAccessDeniedHandler)
                 );
 
         return http.build();
+    }
+
+    /**
+     * Gère les erreurs d'authentification (401)
+     * Les paramètres sont conservés pour la signature de l'interface AuthenticationEntryPoint
+     */
+    private void handleAuthenticationEntryPoint(jakarta.servlet.http.HttpServletRequest request,
+                                                HttpServletResponse response,
+                                                org.springframework.security.core.AuthenticationException authException)
+            throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setContentType("application/json");
+        response.getWriter().write(JSON_UNAUTHORIZED);
+    }
+
+    /**
+     * Gère les erreurs d'accès refusé (403)
+     * Les paramètres sont conservés pour la signature de l'interface AccessDeniedHandler
+     */
+    private void handleAccessDeniedHandler(jakarta.servlet.http.HttpServletRequest request,
+                                           HttpServletResponse response,
+                                           org.springframework.security.access.AccessDeniedException accessDeniedException)
+            throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setContentType("application/json");
+        response.getWriter().write(JSON_FORBIDDEN);
     }
 
     /**

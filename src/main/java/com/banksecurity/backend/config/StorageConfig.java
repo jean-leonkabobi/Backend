@@ -1,15 +1,14 @@
 package com.banksecurity.backend.config;
 
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.UrlResource;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -21,6 +20,7 @@ import java.util.UUID;
  */
 @Slf4j
 @Configuration
+@Getter
 public class StorageConfig {
 
     @Value("${storage.images-path:./storage/images}")
@@ -35,6 +35,8 @@ public class StorageConfig {
     @Value("${storage.max-video-size:104857600}") // 100 MB par défaut
     private long maxVideoSize;
 
+    // ==================== BEAN ====================
+
     /**
      * Initialise les dossiers de stockage au démarrage
      */
@@ -47,32 +49,18 @@ public class StorageConfig {
         properties.setMaxVideoSize(maxVideoSize);
 
         // Créer les dossiers s'ils n'existent pas
-        try {
-            Path imagesDir = Paths.get(imagesPath);
-            Path videosDir = Paths.get(videosPath);
-
-            if (!Files.exists(imagesDir)) {
-                Files.createDirectories(imagesDir);
-                log.info("Dossier d'images créé: {}", imagesDir.toAbsolutePath());
-            }
-
-            if (!Files.exists(videosDir)) {
-                Files.createDirectories(videosDir);
-                log.info("Dossier de vidéos créé: {}", videosDir.toAbsolutePath());
-            }
-        } catch (IOException e) {
-            log.error("Erreur lors de la création des dossiers de stockage", e);
-            throw new StorageException("Impossible de créer les dossiers de stockage", e);
-        }
+        createStorageDirectories();
 
         return properties;
     }
+
+    // ==================== MÉTHODES PUBLIQUES ====================
 
     /**
      * Sauvegarde une image
      */
     public String saveImage(MultipartFile file) throws IOException {
-        validateImage(file);
+        validateFile(file, maxImageSize, "image", "image");
         String filename = generateUniqueFilename(file.getOriginalFilename());
         Path targetPath = Paths.get(imagesPath).resolve(filename);
         Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
@@ -84,40 +72,12 @@ public class StorageConfig {
      * Sauvegarde une vidéo
      */
     public String saveVideo(MultipartFile file) throws IOException {
-        validateVideo(file);
+        validateFile(file, maxVideoSize, "video", "vidéo");
         String filename = generateUniqueFilename(file.getOriginalFilename());
         Path targetPath = Paths.get(videosPath).resolve(filename);
         Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
         log.info("Vidéo sauvegardée: {}", targetPath);
         return targetPath.toString();
-    }
-
-    /**
-     * Charge une image comme ressource
-     */
-    public Resource loadImage(String filename) throws MalformedURLException {
-        Path filePath = Paths.get(imagesPath).resolve(filename).normalize();
-        Resource resource = new UrlResource(filePath.toUri());
-
-        if (resource.exists() && resource.isReadable()) {
-            return resource;
-        } else {
-            throw new StorageException("Image non trouvée: " + filename);
-        }
-    }
-
-    /**
-     * Charge une vidéo comme ressource
-     */
-    public Resource loadVideo(String filename) throws MalformedURLException {
-        Path filePath = Paths.get(videosPath).resolve(filename).normalize();
-        Resource resource = new UrlResource(filePath.toUri());
-
-        if (resource.exists() && resource.isReadable()) {
-            return resource;
-        } else {
-            throw new StorageException("Vidéo non trouvée: " + filename);
-        }
     }
 
     /**
@@ -146,41 +106,48 @@ public class StorageConfig {
         }
     }
 
+    // ==================== MÉTHODES PRIVÉES ====================
+
     /**
-     * Valide une image
+     * Crée les dossiers de stockage s'ils n'existent pas
      */
-    private void validateImage(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new StorageException("Fichier image vide");
-        }
+    private void createStorageDirectories() {
+        createDirectory(imagesPath, "images");
+        createDirectory(videosPath, "vidéos");
+    }
 
-        if (file.getSize() > maxImageSize) {
-            throw new StorageException("Image trop volumineuse. Taille maximale: " +
-                    (maxImageSize / (1024 * 1024)) + " MB");
-        }
-
-        String contentType = file.getContentType();
-        if (contentType == null || !contentType.startsWith("image/")) {
-            throw new StorageException("Type de fichier non supporté pour une image: " + contentType);
+    /**
+     * Crée un dossier de stockage s'il n'existe pas
+     */
+    private void createDirectory(String path, String type) {
+        try {
+            Path directory = Paths.get(path);
+            if (!Files.exists(directory)) {
+                Files.createDirectories(directory);
+                log.info("Dossier de {} créé: {}", type, directory.toAbsolutePath());
+            }
+        } catch (IOException e) {
+            log.error("Erreur lors de la création du dossier de {}", type, e);
+            throw new StorageException("Impossible de créer le dossier de " + type, e);
         }
     }
 
     /**
-     * Valide une vidéo
+     * Valide un fichier (image ou vidéo)
      */
-    private void validateVideo(MultipartFile file) {
+    private void validateFile(MultipartFile file, long maxSize, String expectedType, String typeLabel) {
         if (file == null || file.isEmpty()) {
-            throw new StorageException("Fichier vidéo vide");
+            throw new StorageException("Fichier " + typeLabel + " vide");
         }
 
-        if (file.getSize() > maxVideoSize) {
-            throw new StorageException("Vidéo trop volumineuse. Taille maximale: " +
-                    (maxVideoSize / (1024 * 1024)) + " MB");
+        if (file.getSize() > maxSize) {
+            throw new StorageException(typeLabel.substring(0, 1).toUpperCase() + typeLabel.substring(1) +
+                    " trop volumineux. Taille maximale: " + (maxSize / (1024 * 1024)) + " MB");
         }
 
         String contentType = file.getContentType();
-        if (contentType == null || !contentType.startsWith("video/")) {
-            throw new StorageException("Type de fichier non supporté pour une vidéo: " + contentType);
+        if (contentType == null || !contentType.startsWith(expectedType + "/")) {
+            throw new StorageException("Type de fichier non supporté pour une " + typeLabel + ": " + contentType);
         }
     }
 
@@ -192,50 +159,21 @@ public class StorageConfig {
         if (originalFilename != null && originalFilename.contains(".")) {
             extension = originalFilename.substring(originalFilename.lastIndexOf("."));
         }
-        return UUID.randomUUID().toString() + extension;
+        return UUID.randomUUID() + extension;
     }
+
+    // ==================== CLASSES INTERNES ====================
 
     /**
      * Classe interne pour les propriétés de stockage
      */
+    @Getter
+    @Setter
     public static class StorageProperties {
         private String imagesPath;
         private String videosPath;
         private long maxImageSize;
         private long maxVideoSize;
-
-        // Getters et Setters
-        public String getImagesPath() {
-            return imagesPath;
-        }
-
-        public void setImagesPath(String imagesPath) {
-            this.imagesPath = imagesPath;
-        }
-
-        public String getVideosPath() {
-            return videosPath;
-        }
-
-        public void setVideosPath(String videosPath) {
-            this.videosPath = videosPath;
-        }
-
-        public long getMaxImageSize() {
-            return maxImageSize;
-        }
-
-        public void setMaxImageSize(long maxImageSize) {
-            this.maxImageSize = maxImageSize;
-        }
-
-        public long getMaxVideoSize() {
-            return maxVideoSize;
-        }
-
-        public void setMaxVideoSize(long maxVideoSize) {
-            this.maxVideoSize = maxVideoSize;
-        }
     }
 
     /**

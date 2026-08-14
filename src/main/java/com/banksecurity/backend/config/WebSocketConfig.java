@@ -1,5 +1,8 @@
 package com.banksecurity.backend.config;
 
+import com.banksecurity.backend.security.JwtTokenProvider;
+import jakarta.annotation.Nullable;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
@@ -19,7 +22,10 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 @Slf4j
 @Configuration
 @EnableWebSocketMessageBroker
+@RequiredArgsConstructor
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+
+    private final JwtTokenProvider jwtTokenProvider;
 
     /**
      * Configure les endpoints STOMP pour la communication WebSocket
@@ -81,10 +87,16 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     /**
      * Intercepteur d'authentification pour les connexions WebSocket
      */
-    private static class WebSocketAuthInterceptor implements ChannelInterceptor {
+    private class WebSocketAuthInterceptor implements ChannelInterceptor {
 
         @Override
-        public Message<?> preSend(Message<?> message, MessageChannel channel) {
+        public Message<?> preSend(@Nullable Message<?> message, @Nullable MessageChannel channel) {
+            // Vérifier que les paramètres ne sont pas null
+            if (message == null || channel == null) {
+                log.warn("Message ou canal WebSocket null");
+                return null;
+            }
+
             // Récupérer les headers du message
             StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
             StompCommand command = accessor.getCommand();
@@ -100,9 +112,15 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                     );
                 }
 
-                // TODO: Valider le token JWT ici
-                log.debug("Connexion WebSocket avec token: {}",
-                        authToken.substring(0, Math.min(10, authToken.length())) + "...");
+                // Valider le token JWT
+                String token = authToken.startsWith("Bearer ") ? authToken.substring(7) : authToken;
+
+                if (!jwtTokenProvider.validateToken(token)) {
+                    log.warn("Token JWT invalide pour la connexion WebSocket");
+                    throw new IllegalArgumentException("Token JWT invalide");
+                }
+
+                log.debug("Connexion WebSocket authentifiée avec token valide");
             }
 
             return message;
