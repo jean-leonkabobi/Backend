@@ -1,4 +1,269 @@
 package com.banksecurity.backend.service.impl;
 
-public class DashboardServiceImpl {
+import com.banksecurity.backend.dto.response.DashboardStatsResponse;
+import com.banksecurity.backend.model.enums.AlertSeverity;
+import com.banksecurity.backend.model.enums.AlertStatus;
+import com.banksecurity.backend.model.enums.CameraStatus;
+import com.banksecurity.backend.repository.AlertRepository;
+import com.banksecurity.backend.repository.CameraRepository;
+import com.banksecurity.backend.repository.RuleRepository;
+import com.banksecurity.backend.repository.ZoneRepository;
+import com.banksecurity.backend.service.DashboardService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.OperatingSystemMXBean;
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class DashboardServiceImpl implements DashboardService {
+
+    private final AlertRepository alertRepository;
+    private final CameraRepository cameraRepository;
+    private final ZoneRepository zoneRepository;
+    private final RuleRepository ruleRepository;
+
+    @Override
+    public DashboardStatsResponse getGlobalStats() {
+        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
+        LocalDateTime previous24h = LocalDateTime.now().minusHours(48);
+
+        // Statistiques générales
+        long totalCameras = cameraRepository.count();
+        long activeCameras = cameraRepository.countByStatus(CameraStatus.ACTIVE);
+        long camerasInError = cameraRepository.countByStatus(CameraStatus.ERROR);
+        long totalZones = zoneRepository.count();
+        long totalRules = ruleRepository.count();
+        long activeRules = ruleRepository.findByIsActiveTrue().size();
+
+        // Alertes des dernières 24h
+        long totalAlerts24h = alertRepository.countAlertsSince(last24h);
+        long criticalAlerts24h = alertRepository.countAlertsBySeveritySince(AlertSeverity.CRITICAL, last24h);
+        long highAlerts24h = alertRepository.countAlertsBySeveritySince(AlertSeverity.HIGH, last24h);
+        long mediumAlerts24h = alertRepository.countAlertsBySeveritySince(AlertSeverity.MEDIUM, last24h);
+        long infoAlerts24h = alertRepository.countAlertsBySeveritySince(AlertSeverity.INFO, last24h);
+
+        // Alertes non résolues
+        long pendingAlerts = alertRepository.countAlertsByStatusSince(AlertStatus.PENDING, last24h);
+        long processingAlerts = alertRepository.countAlertsByStatusSince(AlertStatus.PROCESSING, last24h);
+        long escalatedAlerts = alertRepository.countAlertsByStatusSince(AlertStatus.ESCALATED, last24h);
+
+        // Statistiques par heure - CORRECTION : utiliser convertToIntMap
+        Map<Integer, Long> alertsByHour = convertToIntMap(
+                alertRepository.countAlertsByHourSince(last24h)
+        );
+
+        // Statistiques par type
+        Map<String, Long> alertsByType = convertToStringMap(
+                alertRepository.countAlertsByTypeSince(last24h)
+        );
+
+        // Statistiques par caméra
+        Map<String, Long> alertsByCamera = convertToStringMap(
+                alertRepository.countAlertsByCameraSince(last24h)
+        );
+
+        // Tendances
+        long previousTotalAlerts = alertRepository.countAlertsSince(previous24h) - totalAlerts24h;
+        double alertTrend = calculateTrendPercentage(totalAlerts24h, previousTotalAlerts);
+
+        long previousCriticalAlerts = alertRepository.countAlertsBySeveritySince(AlertSeverity.CRITICAL, previous24h) - criticalAlerts24h;
+        double criticalTrend = calculateTrendPercentage(criticalAlerts24h, previousCriticalAlerts);
+
+        // Top caméras par alertes - CORRECTION : utiliser les bons types
+        List<DashboardStatsResponse.CameraAlertStats> topCameras = getTopCamerasByAlerts(5).entrySet().stream()
+                .map(entry -> {
+                    // Récupérer le nom de la caméra à partir du repository
+                    String cameraName = cameraRepository.findById(entry.getKey())
+                            .map(camera -> camera.getName())
+                            .orElse("Caméra inconnue");
+
+                    return DashboardStatsResponse.CameraAlertStats.builder()
+                            .cameraName(cameraName)
+                            .alertCount(entry.getValue())
+                            .criticalCount(alertRepository.countAlertsBySeveritySince(AlertSeverity.CRITICAL, last24h))
+                            .build();
+                })
+                .collect(Collectors.toList());
+
+        // Informations système
+        DashboardStatsResponse.SystemInfo systemInfo = getSystemInfo();
+
+        return DashboardStatsResponse.builder()
+                .totalCameras(totalCameras)
+                .activeCameras(activeCameras)
+                .camerasInError(camerasInError)
+                .totalZones(totalZones)
+                .totalRules(totalRules)
+                .activeRules(activeRules)
+                .totalAlerts24h(totalAlerts24h)
+                .criticalAlerts24h(criticalAlerts24h)
+                .highAlerts24h(highAlerts24h)
+                .mediumAlerts24h(mediumAlerts24h)
+                .infoAlerts24h(infoAlerts24h)
+                .pendingAlerts(pendingAlerts)
+                .processingAlerts(processingAlerts)
+                .escalatedAlerts(escalatedAlerts)
+                .alertsByHour(alertsByHour)
+                .alertsByType(alertsByType)
+                .alertsByCamera(alertsByCamera)
+                .alertTrendPercentage(alertTrend)
+                .criticalAlertTrendPercentage(criticalTrend)
+                .topCamerasByAlerts(topCameras)
+                .systemInfo(systemInfo)
+                .build();
+    }
+
+    @Override
+    public DashboardStatsResponse getStatsForPeriod(LocalDateTime start, LocalDateTime end) {
+        // Implémentation similaire avec une période personnalisée
+        long totalAlerts = alertRepository.findByCreatedAtBetween(start, end).size();
+
+        return DashboardStatsResponse.builder()
+                .totalAlerts24h(totalAlerts)
+                .criticalAlerts24h(alertRepository.countAlertsBySeveritySince(AlertSeverity.CRITICAL, start))
+                .highAlerts24h(alertRepository.countAlertsBySeveritySince(AlertSeverity.HIGH, start))
+                .mediumAlerts24h(alertRepository.countAlertsBySeveritySince(AlertSeverity.MEDIUM, start))
+                .infoAlerts24h(alertRepository.countAlertsBySeveritySince(AlertSeverity.INFO, start))
+                .build();
+    }
+
+    @Override
+    public Map<Integer, Long> getAlertsByHour() {
+        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
+        return convertToIntMap(alertRepository.countAlertsByHourSince(last24h));
+    }
+
+    @Override
+    public Map<String, Long> getAlertsByType() {
+        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
+        return convertToStringMap(alertRepository.countAlertsByTypeSince(last24h));
+    }
+
+    @Override
+    public Map<String, Long> getAlertsByCamera() {
+        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
+        return convertToStringMap(alertRepository.countAlertsByCameraSince(last24h));
+    }
+
+    @Override
+    public Map<UUID, Long> getTopCamerasByAlerts(int limit) {
+        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
+        List<Object[]> results = alertRepository.countAlertsByCameraSince(last24h);
+
+        Map<UUID, Long> topCameras = new HashMap<>();
+
+        // Note: Le résultat de countAlertsByCameraSince retourne [cameraName, count]
+        // Pour obtenir les UUID, il faudrait ajuster la requête dans le repository
+
+        // Solution temporaire : chercher les caméras par nom
+        for (int i = 0; i < Math.min(limit, results.size()); i++) {
+            Object[] result = results.get(i);
+            if (result.length >= 2 && result[0] != null && result[1] != null) {
+                String cameraName = result[0].toString();
+                long alertCount = Long.parseLong(result[1].toString());
+
+                // Chercher la caméra par son nom
+                cameraRepository.findAll().stream()
+                        .filter(camera -> camera.getName().equals(cameraName))
+                        .findFirst()
+                        .ifPresent(camera -> topCameras.put(camera.getId(), alertCount));
+            }
+        }
+
+        return topCameras;
+    }
+
+    @Override
+    public double calculateAlertTrend() {
+        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
+        LocalDateTime previous24h = LocalDateTime.now().minusHours(48);
+
+        long currentAlerts = alertRepository.countAlertsSince(last24h);
+        long previousAlerts = alertRepository.countAlertsSince(previous24h) - currentAlerts;
+
+        return calculateTrendPercentage(currentAlerts, previousAlerts);
+    }
+
+    @Override
+    public DashboardStatsResponse.SystemInfo getSystemInfo() {
+        OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
+        MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
+
+        long totalMemory = Runtime.getRuntime().totalMemory();
+        long freeMemory = Runtime.getRuntime().freeMemory();
+        long usedMemory = totalMemory - freeMemory;
+
+        double cpuUsage = osBean.getSystemLoadAverage();
+        double memoryUsage = (double) usedMemory / totalMemory * 100;
+
+        return DashboardStatsResponse.SystemInfo.builder()
+                .version("1.0.0")
+                .uptime(ManagementFactory.getRuntimeMXBean().getUptime() + " ms")
+                .totalStorageUsed(usedMemory)
+                .totalStorageAvailable(totalMemory)
+                .cpuUsage(cpuUsage)
+                .memoryUsage(memoryUsage)
+                .build();
+    }
+
+    @Override
+    public long getPendingAlertsCount() {
+        return alertRepository.findByStatus(AlertStatus.PENDING).size();
+    }
+
+    @Override
+    public long getEscalatedAlertsCount() {
+        return alertRepository.findByStatus(AlertStatus.ESCALATED).size();
+    }
+
+    /**
+     * Convertit une liste d'Object[] en Map<String, Long>
+     */
+    private Map<String, Long> convertToStringMap(List<Object[]> results) {
+        Map<String, Long> map = new HashMap<>();
+        for (Object[] result : results) {
+            if (result.length >= 2 && result[0] != null && result[1] != null) {
+                map.put(result[0].toString(), Long.parseLong(result[1].toString()));
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Convertit une liste d'Object[] en Map<Integer, Long>
+     */
+    private Map<Integer, Long> convertToIntMap(List<Object[]> results) {
+        Map<Integer, Long> map = new HashMap<>();
+        for (Object[] result : results) {
+            if (result.length >= 2 && result[0] != null && result[1] != null) {
+                try {
+                    map.put(Integer.parseInt(result[0].toString()), Long.parseLong(result[1].toString()));
+                } catch (NumberFormatException e) {
+                    log.warn("Impossible de convertir en Integer: {}", result[0]);
+                }
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Calcule le pourcentage de tendance
+     */
+    private double calculateTrendPercentage(long current, long previous) {
+        if (previous == 0) {
+            return current > 0 ? 100.0 : 0.0;
+        }
+        return ((double) (current - previous) / previous) * 100;
+    }
 }
