@@ -39,4 +39,14 @@ public interface WebSocketService {
      * Récupère le nombre de clients connectés
      */
     int getConnectedClientsCount();
+
+    /**
+     * Enregistre une connexion utilisateur
+     */
+    void registerUserConnection(String username);
+
+    /**
+     * Déconnecte un utilisateur
+     */
+    void unregisterUserConnection(String username);
 }
