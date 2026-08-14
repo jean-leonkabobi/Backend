@@ -3,6 +3,7 @@ package com.banksecurity.backend.service.impl;
 import com.banksecurity.backend.dto.request.UserRequest;
 import com.banksecurity.backend.dto.response.UserResponse;
 import com.banksecurity.backend.exception.BadRequestException;
+import com.banksecurity.backend.exception.ConflictException;
 import com.banksecurity.backend.exception.ResourceNotFoundException;
 import com.banksecurity.backend.model.User;
 import com.banksecurity.backend.model.enums.UserRole;
@@ -31,8 +32,9 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserResponse createUser(UserRequest request) {
+        // ✅ Utilisation de ConflictException
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new BadRequestException("Cet email est déjà utilisé");
+            throw new ConflictException("Cet email est déjà utilisé: " + request.getEmail());
         }
 
         if (request.getPassword() == null || request.getPassword().isEmpty()) {
@@ -65,10 +67,10 @@ public class UserServiceImpl implements UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", id));
 
-        // Vérifier si le nouvel email n'est pas déjà utilisé
+        // ✅ Utilisation de ConflictException
         if (!user.getEmail().equals(request.getEmail()) &&
                 userRepository.existsByEmail(request.getEmail())) {
-            throw new BadRequestException("Cet email est déjà utilisé");
+            throw new ConflictException("Cet email est déjà utilisé: " + request.getEmail());
         }
 
         user.setEmail(request.getEmail());

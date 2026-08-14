@@ -3,6 +3,7 @@ package com.banksecurity.backend.service.impl;
 import com.banksecurity.backend.dto.request.CameraRequest;
 import com.banksecurity.backend.dto.response.CameraResponse;
 import com.banksecurity.backend.exception.BadRequestException;
+import com.banksecurity.backend.exception.ConflictException;
 import com.banksecurity.backend.exception.ResourceNotFoundException;
 import com.banksecurity.backend.model.Camera;
 import com.banksecurity.backend.model.enums.CameraStatus;
@@ -41,6 +42,11 @@ public class CameraServiceImpl implements CameraService {
             throw new BadRequestException("Adresse IP invalide");
         }
 
+        // ✅ Utilisation de ConflictException - Vérifier si l'IP existe déjà
+        if (request.getIpAddress() != null && cameraRepository.findByIpAddress(request.getIpAddress()).isPresent()) {
+            throw new ConflictException("Une caméra avec cette adresse IP existe déjà: " + request.getIpAddress());
+        }
+
         Camera camera = Camera.builder()
                 .name(request.getName())
                 .rtspUrl(request.getRtspUrl())
@@ -71,6 +77,13 @@ public class CameraServiceImpl implements CameraService {
 
         if (!ValidationUtils.isValidRtspUrl(request.getRtspUrl())) {
             throw new BadRequestException("URL RTSP invalide");
+        }
+
+        // ✅ Utilisation de ConflictException - Vérifier si l'IP est déjà utilisée par une autre caméra
+        if (request.getIpAddress() != null && !request.getIpAddress().equals(camera.getIpAddress())) {
+            cameraRepository.findByIpAddress(request.getIpAddress()).ifPresent(existingCamera -> {
+                throw new ConflictException("Une caméra avec cette adresse IP existe déjà: " + request.getIpAddress());
+            });
         }
 
         camera.setName(request.getName());

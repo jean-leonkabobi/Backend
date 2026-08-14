@@ -3,6 +3,7 @@ package com.banksecurity.backend.service.impl;
 import com.banksecurity.backend.dto.request.ZoneRequest;
 import com.banksecurity.backend.dto.response.ZoneResponse;
 import com.banksecurity.backend.exception.BadRequestException;
+import com.banksecurity.backend.exception.ConflictException;
 import com.banksecurity.backend.exception.ResourceNotFoundException;
 import com.banksecurity.backend.model.Camera;
 import com.banksecurity.backend.model.Zone;
@@ -42,9 +43,9 @@ public class ZoneServiceImpl implements ZoneService {
             throw new BadRequestException("Points du polygone invalides. Format attendu: [[x1,y1],[x2,y2],...]");
         }
 
-        // Vérifier si une zone avec le même nom existe déjà pour cette caméra
+        // ✅ Utilisation de ConflictException
         if (zoneRepository.existsByCameraIdAndName(request.getCameraId(), request.getName())) {
-            throw new BadRequestException("Une zone avec ce nom existe déjà pour cette caméra");
+            throw new ConflictException("Une zone avec ce nom existe déjà pour cette caméra: " + request.getName());
         }
 
         Zone zone = Zone.builder()
@@ -76,6 +77,12 @@ public class ZoneServiceImpl implements ZoneService {
             Camera camera = cameraRepository.findById(request.getCameraId())
                     .orElseThrow(() -> new ResourceNotFoundException("Caméra", "id", request.getCameraId()));
             zone.setCamera(camera);
+        }
+
+        // ✅ Utilisation de ConflictException
+        if (!zone.getName().equals(request.getName()) &&
+                zoneRepository.existsByCameraIdAndName(request.getCameraId(), request.getName())) {
+            throw new ConflictException("Une zone avec ce nom existe déjà pour cette caméra: " + request.getName());
         }
 
         zone.setName(request.getName());

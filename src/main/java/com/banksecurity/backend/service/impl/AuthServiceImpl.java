@@ -4,6 +4,7 @@ import com.banksecurity.backend.dto.request.LoginRequest;
 import com.banksecurity.backend.dto.request.RegisterRequest;
 import com.banksecurity.backend.dto.response.AuthResponse;
 import com.banksecurity.backend.exception.BadRequestException;
+import com.banksecurity.backend.exception.ConflictException;
 import com.banksecurity.backend.exception.UnauthorizedException;
 import com.banksecurity.backend.model.User;
 import com.banksecurity.backend.model.enums.UserRole;
@@ -98,9 +99,9 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse register(RegisterRequest registerRequest) {
-        // Vérifier si l'email existe déjà
+        // ✅ Utilisation de ConflictException pour les doublons
         if (userRepository.existsByEmail(registerRequest.getEmail())) {
-            throw new BadRequestException("Cet email est déjà utilisé");
+            throw new ConflictException("Cet email est déjà utilisé: " + registerRequest.getEmail());
         }
 
         // Créer le nouvel utilisateur
