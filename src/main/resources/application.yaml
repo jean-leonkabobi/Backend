@@ -42,12 +42,18 @@ spring:
           auth: true
           starttls:
             enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
 
   # Configuration Multipart (upload fichiers)
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 10MB
+      max-file-size: ${MAX_FILE_SIZE:10MB}
+      max-request-size: ${MAX_REQUEST_SIZE:10MB}
+      enabled: true
+      file-size-threshold: 2KB
 
 # Configuration Serveur
 server:
@@ -56,47 +62,137 @@ server:
     context-path: /api
   compression:
     enabled: true
-    mime-types: application/json,application/xml,text/html,text/plain
+    mime-types: application/json,application/xml,text/html,text/plain,text/css,application/javascript
+    min-response-size: 1024
+  error:
+    include-message: always
+    include-stacktrace: never
+  tomcat:
+    max-connections: 10000
+    max-http-post-size: 10MB
+    max-swallow-size: 10MB
+    threads:
+      max: 200
+      min-spare: 10
 
 # Configuration JWT
 jwt:
   secret: ${JWT_SECRET:votreSecretTresLongEtComplexePourJWTToken2024!}
   expiration: 3600000  # 1 heure en millisecondes
-  refresh-expiration: 86400000  # 24 heures
+  refresh-expiration: 86400000  # 24 heures en millisecondes
 
 # Configuration IA Service
 ia:
   service:
     url: ${IA_SERVICE_URL:http://localhost:8000}
     timeout: 5000
+    retry:
+      max-attempts: 3
+      backoff: 1000
 
 # Configuration Stockage
 storage:
   images-path: ${STORAGE_IMAGES:./storage/images}
   videos-path: ${STORAGE_VIDEOS:./storage/videos}
-  max-image-size: 10MB
-  max-video-size: 100MB
+  max-image-size: ${MAX_IMAGE_SIZE:10485760}  # 10 MB en bytes
+  max-video-size: ${MAX_VIDEO_SIZE:104857600}  # 100 MB en bytes
+  retention:
+    images-days: 90
+    videos-days: 30
+
+# Configuration CORS
+cors:
+  allowed-origins:
+    - http://localhost:3000
+    - http://localhost:5173
+    - http://192.168.1.100:3000
+    - https://app.banksecurity.com
+  allowed-methods:
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    - OPTIONS
+  allowed-headers:
+    - Authorization
+    - Content-Type
+    - Accept
+    - Origin
+    - X-Requested-With
+  allow-credentials: true
+  max-age: 3600
 
 # Configuration Actuator
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,env,beans,threaddump,heapdump
+      base-path: /actuator
+      path-mapping:
+        health: /health
+        info: /info
+        metrics: /metrics
+        prometheus: /prometheus
   endpoint:
     health:
       show-details: always
+      show-components: always
+      probes:
+        enabled: true
+      # Correction pour Spring Boot 4.x
+      group:
+        readiness:
+          additional-path: readiness
+          show-details: always
+          include:
+            - readinessState
+            - db
+        liveness:
+          additional-path: liveness
+          show-details: always
+          include:
+            - livenessState
+            - ping
+    metrics:
+      enabled: true
+    prometheus:
+      enabled: true
+    info:
+      enabled: true
   metrics:
     export:
       prometheus:
         enabled: true
+        step: 1m
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      sla:
+        http.server.requests: 10ms, 50ms, 100ms, 200ms, 500ms, 1s, 5s
+  info:
+    env:
+      enabled: true
+    build:
+      enabled: true
+    git:
+      enabled: true
+      mode: full
 
 # Configuration Logging
 logging:
   level:
     com.banksecurity: ${LOG_LEVEL:DEBUG}
+    com.banksecurity.backend.config: INFO
+    com.banksecurity.backend.security: DEBUG
     org.springframework.web: INFO
+    org.springframework.security: WARN
     org.hibernate: WARN
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+    org.springframework.web.socket: DEBUG
+    org.springframework.messaging: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
@@ -104,11 +200,103 @@ logging:
     name: ./logs/application.log
     max-size: 10MB
     max-history: 30
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 30
+      total-size-cap: 1GB
+      clean-history-on-start: false
 
-# Configuration OpenAPI
+# Configuration OpenAPI/Swagger
 springdoc:
   api-docs:
     path: /api-docs
+    enabled: true
+    groups:
+      enabled: true
   swagger-ui:
     path: /swagger-ui.html
+    enabled: true
     operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
+    show-extensions: true
+    show-common-extensions: true
+    doc-expansion: none
+    default-models-expand-depth: 1
+    default-model-expand-depth: 1
+    display-operation-id: false
+    filter: true
+    persist-authorization: true
+    try-it-out-enabled: true
+    use-root-path: false
+    disable-swagger-default-url: true
+    display-query-params-without-oauth2: false
+  packages-to-scan: com.banksecurity.backend.controller
+  paths-to-match: /**
+  cache:
+    disabled: true
+
+# Configuration WebSocket
+websocket:
+  endpoint: /ws
+  allowed-origins:
+    - http://localhost:3000
+    - http://localhost:5173
+  heartbeat-incoming: 10000  # 10 secondes
+  heartbeat-outgoing: 10000  # 10 secondes
+
+# Configuration Async
+async:
+  task-executor:
+    core-pool-size: 5
+    max-pool-size: 20
+    queue-capacity: 100
+    thread-name-prefix: async-
+    wait-for-tasks-on-shutdown: true
+    await-termination-seconds: 60
+  ia-executor:
+    core-pool-size: 2
+    max-pool-size: 10
+    queue-capacity: 50
+    thread-name-prefix: ia-
+    await-termination-seconds: 30
+  notification-executor:
+    core-pool-size: 3
+    max-pool-size: 10
+    queue-capacity: 50
+    thread-name-prefix: notification-
+    await-termination-seconds: 30
+  storage-executor:
+    core-pool-size: 2
+    max-pool-size: 5
+    queue-capacity: 20
+    thread-name-prefix: storage-
+    await-termination-seconds: 30
+  cleanup-executor:
+    core-pool-size: 1
+    max-pool-size: 2
+    queue-capacity: 10
+    thread-name-prefix: cleanup-
+    await-termination-seconds: 30
+  audit-executor:
+    core-pool-size: 2
+    max-pool-size: 5
+    queue-capacity: 50
+    thread-name-prefix: audit-
+    await-termination-seconds: 30
+
+# Configuration Rate Limiting
+rate-limiting:
+  enabled: true
+  max-requests-per-minute: 60
+  window-size-ms: 60000
+
+# Configuration des informations de l'application
+info:
+  app:
+    name: ${spring.application.name}
+    version: 1.0.0
+    description: "API Agent de Sécurité Bancaire"
+    contact:
+      email: dev@banksecurity.com
