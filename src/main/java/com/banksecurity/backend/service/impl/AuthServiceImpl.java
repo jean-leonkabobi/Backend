@@ -3,8 +3,9 @@ package com.banksecurity.backend.service.impl;
 import com.banksecurity.backend.dto.request.LoginRequest;
 import com.banksecurity.backend.dto.request.RegisterRequest;
 import com.banksecurity.backend.dto.response.AuthResponse;
-import com.banksecurity.backend.exception.BadRequestException;
 import com.banksecurity.backend.exception.ConflictException;
+import com.banksecurity.backend.exception.ForbiddenException;
+import com.banksecurity.backend.exception.ResourceNotFoundException;
 import com.banksecurity.backend.exception.UnauthorizedException;
 import com.banksecurity.backend.model.User;
 import com.banksecurity.backend.model.enums.UserRole;
@@ -40,7 +41,6 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public AuthResponse login(LoginRequest loginRequest) {
         try {
-            // Authentifier l'utilisateur
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
                             loginRequest.getEmail(),
@@ -52,18 +52,15 @@ public class AuthServiceImpl implements AuthService {
 
             UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
 
-            // Générer les tokens
             String token = tokenProvider.generateToken(userPrincipal);
             String refreshToken = tokenProvider.generateRefreshToken(userPrincipal);
 
-            // Mettre à jour la date de dernière connexion
             User user = userRepository.findById(userPrincipal.getId())
-                    .orElseThrow(() -> new BadRequestException("Utilisateur non trouvé"));
+                    .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", userPrincipal.getId()));
             user.setLastLogin(LocalDateTime.now());
             user.setFailedAttempts(0);
             userRepository.save(user);
 
-            // Journaliser l'action
             auditLogService.logAction(user.getId(), "LOGIN", "Connexion réussie");
 
             log.info("Utilisateur connecté: {}", userPrincipal.getEmail());
@@ -80,8 +77,9 @@ public class AuthServiceImpl implements AuthService {
                     .role(userPrincipal.getRole())
                     .build();
 
+        } catch (UnauthorizedException e) {
+            throw e;
         } catch (Exception e) {
-            // Incrémenter le compteur d'échecs
             userRepository.findByEmail(loginRequest.getEmail()).ifPresent(user -> {
                 user.setFailedAttempts(user.getFailedAttempts() + 1);
                 if (user.getFailedAttempts() >= 5) {
@@ -92,96 +90,110 @@ public class AuthServiceImpl implements AuthService {
             });
 
             log.error("Échec de connexion pour {}: {}", loginRequest.getEmail(), e.getMessage());
-            throw new UnauthorizedException("Email ou mot de passe incorrect");
+            throw new UnauthorizedException("Email ou mot de passe incorrect", e);
         }
     }
 
     @Override
     @Transactional
     public AuthResponse register(RegisterRequest registerRequest) {
-        // ✅ Utilisation de ConflictException pour les doublons
-        if (userRepository.existsByEmail(registerRequest.getEmail())) {
-            throw new ConflictException("Cet email est déjà utilisé: " + registerRequest.getEmail());
+        try {
+            if (userRepository.existsByEmail(registerRequest.getEmail())) {
+                throw new ConflictException("Cet email est déjà utilisé: " + registerRequest.getEmail());
+            }
+
+            User user = User.builder()
+                    .email(registerRequest.getEmail())
+                    .passwordHash(passwordEncoder.encode(registerRequest.getPassword()))
+                    .firstName(registerRequest.getFirstName())
+                    .lastName(registerRequest.getLastName())
+                    .role(registerRequest.getRole() != null ? registerRequest.getRole() : UserRole.SECURITY)
+                    .phoneNumber(registerRequest.getPhoneNumber())
+                    .isActive(true)
+                    .accountLocked(false)
+                    .failedAttempts(0)
+                    .build();
+
+            user = userRepository.save(user);
+
+            UserPrincipal userPrincipal = UserPrincipal.create(user);
+            String token = tokenProvider.generateToken(userPrincipal);
+            String refreshToken = tokenProvider.generateRefreshToken(userPrincipal);
+
+            auditLogService.logAction(user.getId(), "REGISTER", "Nouvel utilisateur créé");
+
+            log.info("Nouvel utilisateur enregistré: {}", user.getEmail());
+
+            return AuthResponse.builder()
+                    .token(token)
+                    .refreshToken(refreshToken)
+                    .tokenType("Bearer")
+                    .expiresIn(tokenProvider.getTokenValidityInSeconds())
+                    .userId(user.getId())
+                    .email(user.getEmail())
+                    .firstName(user.getFirstName())
+                    .lastName(user.getLastName())
+                    .role(user.getRole())
+                    .build();
+
+        } catch (ConflictException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de l'enregistrement de {}: {}", registerRequest.getEmail(), e.getMessage(), e);
+            throw new ConflictException("Erreur lors de l'enregistrement: " + registerRequest.getEmail(), e);
         }
-
-        // Créer le nouvel utilisateur
-        User user = User.builder()
-                .email(registerRequest.getEmail())
-                .passwordHash(passwordEncoder.encode(registerRequest.getPassword()))
-                .firstName(registerRequest.getFirstName())
-                .lastName(registerRequest.getLastName())
-                .role(registerRequest.getRole() != null ? registerRequest.getRole() : UserRole.SECURITY)
-                .phoneNumber(registerRequest.getPhoneNumber())
-                .isActive(true)
-                .accountLocked(false)
-                .failedAttempts(0)
-                .build();
-
-        user = userRepository.save(user);
-
-        // Générer les tokens
-        UserPrincipal userPrincipal = UserPrincipal.create(user);
-        String token = tokenProvider.generateToken(userPrincipal);
-        String refreshToken = tokenProvider.generateRefreshToken(userPrincipal);
-
-        // Journaliser l'action
-        auditLogService.logAction(user.getId(), "REGISTER", "Nouvel utilisateur créé");
-
-        log.info("Nouvel utilisateur enregistré: {}", user.getEmail());
-
-        return AuthResponse.builder()
-                .token(token)
-                .refreshToken(refreshToken)
-                .tokenType("Bearer")
-                .expiresIn(tokenProvider.getTokenValidityInSeconds())
-                .userId(user.getId())
-                .email(user.getEmail())
-                .firstName(user.getFirstName())
-                .lastName(user.getLastName())
-                .role(user.getRole())
-                .build();
     }
 
     @Override
     public AuthResponse refreshToken(String refreshToken) {
-        if (!tokenProvider.validateToken(refreshToken)) {
-            throw new UnauthorizedException("Refresh token invalide");
+        try {
+            if (!tokenProvider.validateToken(refreshToken)) {
+                throw new UnauthorizedException("Refresh token invalide");
+            }
+
+            String email = tokenProvider.getUsernameFromToken(refreshToken);
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "email", email));
+
+            UserPrincipal userPrincipal = UserPrincipal.create(user);
+
+            String newToken = tokenProvider.generateToken(userPrincipal);
+            String newRefreshToken = tokenProvider.generateRefreshToken(userPrincipal);
+
+            return AuthResponse.builder()
+                    .token(newToken)
+                    .refreshToken(newRefreshToken)
+                    .tokenType("Bearer")
+                    .expiresIn(tokenProvider.getTokenValidityInSeconds())
+                    .userId(user.getId())
+                    .email(user.getEmail())
+                    .firstName(user.getFirstName())
+                    .lastName(user.getLastName())
+                    .role(user.getRole())
+                    .build();
+
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (UnauthorizedException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors du rafraîchissement du token: {}", e.getMessage(), e);
+            throw new UnauthorizedException("Erreur lors du rafraîchissement du token", e);
         }
-
-        // Extraire l'utilisateur du token
-        String email = tokenProvider.getUsernameFromToken(refreshToken);
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UnauthorizedException("Utilisateur non trouvé"));
-
-        UserPrincipal userPrincipal = UserPrincipal.create(user);
-
-        // Générer de nouveaux tokens
-        String newToken = tokenProvider.generateToken(userPrincipal);
-        String newRefreshToken = tokenProvider.generateRefreshToken(userPrincipal);
-
-        return AuthResponse.builder()
-                .token(newToken)
-                .refreshToken(newRefreshToken)
-                .tokenType("Bearer")
-                .expiresIn(tokenProvider.getTokenValidityInSeconds())
-                .userId(user.getId())
-                .email(user.getEmail())
-                .firstName(user.getFirstName())
-                .lastName(user.getLastName())
-                .role(user.getRole())
-                .build();
     }
 
     @Override
     public void logout(String token) {
-        // Avec JWT, le logout est géré côté client (suppression du token)
-        // Mais on peut journaliser l'action
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication != null && authentication.getPrincipal() instanceof UserPrincipal) {
-            UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
-            auditLogService.logAction(userPrincipal.getId(), "LOGOUT", "Déconnexion");
-            log.info("Utilisateur déconnecté: {}", userPrincipal.getEmail());
+
+        // ✅ Utilisation de ForbiddenException
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
+            throw new ForbiddenException("Utilisateur non authentifié");
         }
+
+        UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
+        auditLogService.logAction(userPrincipal.getId(), "LOGOUT", "Déconnexion");
+        log.info("Utilisateur déconnecté: {}", userPrincipal.getEmail());
 
         SecurityContextHolder.clearContext();
     }
@@ -194,9 +206,9 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public String getCurrentUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication != null && authentication.getPrincipal() instanceof UserPrincipal) {
-            return ((UserPrincipal) authentication.getPrincipal()).getUsername();
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
+            throw new ForbiddenException("Utilisateur non authentifié");
         }
-        return null;
+        return ((UserPrincipal) authentication.getPrincipal()).getUsername();
     }
 }

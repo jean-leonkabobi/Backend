@@ -2,6 +2,7 @@ package com.banksecurity.backend.exception;
 
 import com.banksecurity.backend.dto.response.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -13,7 +14,6 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
@@ -25,6 +25,12 @@ import java.util.stream.Collectors;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    // Constantes pour les messages d'erreur
+    private static final String ERROR_VALIDATION = "Erreur de validation";
+    private static final String ERROR_INTERNAL = "Erreur interne";
+    private static final int HTTP_UNPROCESSABLE_ENTITY = 422;
+    private static final int HTTP_PAYLOAD_TOO_LARGE = 413;
 
     // 404 - Ressource non trouvée
     @ExceptionHandler(ResourceNotFoundException.class)
@@ -129,15 +135,15 @@ public class GlobalExceptionHandler {
         }
 
         ErrorResponse error = ErrorResponse.builder()
-                .status(HttpStatus.UNPROCESSABLE_ENTITY.value())
-                .error("Erreur de validation")
+                .status(HTTP_UNPROCESSABLE_ENTITY)
+                .error(ERROR_VALIDATION)
                 .message(ex.getMessage())
                 .path(request.getRequestURI())
                 .timestamp(LocalDateTime.now())
                 .validationErrors(validationErrors)
                 .build();
 
-        return new ResponseEntity<>(error, HttpStatus.UNPROCESSABLE_ENTITY);
+        return ResponseEntity.status(HTTP_UNPROCESSABLE_ENTITY).body(error);
     }
 
     // Validation des @Valid dans les controllers
@@ -160,7 +166,7 @@ public class GlobalExceptionHandler {
 
         ErrorResponse error = ErrorResponse.builder()
                 .status(HttpStatus.BAD_REQUEST.value())
-                .error("Erreur de validation")
+                .error(ERROR_VALIDATION)
                 .message("Les données fournies sont invalides")
                 .path(request.getRequestURI())
                 .timestamp(LocalDateTime.now())
@@ -181,13 +187,13 @@ public class GlobalExceptionHandler {
                 .stream()
                 .collect(Collectors.toMap(
                         violation -> violation.getPropertyPath().toString(),
-                        violation -> violation.getMessage(),
+                        ConstraintViolation::getMessage,
                         (error1, error2) -> error1
                 ));
 
         ErrorResponse error = ErrorResponse.builder()
                 .status(HttpStatus.BAD_REQUEST.value())
-                .error("Erreur de validation")
+                .error(ERROR_VALIDATION)
                 .message("Contraintes de validation violées")
                 .path(request.getRequestURI())
                 .timestamp(LocalDateTime.now())
@@ -205,14 +211,14 @@ public class GlobalExceptionHandler {
         log.error("MaxUploadSizeExceededException: {}", ex.getMessage());
 
         ErrorResponse error = ErrorResponse.builder()
-                .status(HttpStatus.PAYLOAD_TOO_LARGE.value())
+                .status(HTTP_PAYLOAD_TOO_LARGE)
                 .error("Fichier trop volumineux")
                 .message("La taille du fichier dépasse la limite autorisée")
                 .path(request.getRequestURI())
                 .timestamp(LocalDateTime.now())
                 .build();
 
-        return new ResponseEntity<>(error, HttpStatus.PAYLOAD_TOO_LARGE);
+        return ResponseEntity.status(HTTP_PAYLOAD_TOO_LARGE).body(error);
     }
 
     // 404 - Endpoint non trouvé
@@ -242,7 +248,7 @@ public class GlobalExceptionHandler {
 
         ErrorResponse error = ErrorResponse.builder()
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
-                .error("Erreur interne")
+                .error(ERROR_INTERNAL)
                 .message("Une erreur interne est survenue")
                 .path(request.getRequestURI())
                 .timestamp(LocalDateTime.now())
@@ -260,7 +266,7 @@ public class GlobalExceptionHandler {
 
         ErrorResponse error = ErrorResponse.builder()
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
-                .error("Erreur interne")
+                .error(ERROR_INTERNAL)
                 .message("Une référence nulle a été rencontrée")
                 .path(request.getRequestURI())
                 .timestamp(LocalDateTime.now())

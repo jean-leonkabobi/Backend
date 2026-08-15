@@ -4,17 +4,21 @@ import com.banksecurity.backend.dto.request.ZoneRequest;
 import com.banksecurity.backend.dto.response.ZoneResponse;
 import com.banksecurity.backend.exception.BadRequestException;
 import com.banksecurity.backend.exception.ConflictException;
+import com.banksecurity.backend.exception.ForbiddenException;
 import com.banksecurity.backend.exception.ResourceNotFoundException;
 import com.banksecurity.backend.model.Camera;
 import com.banksecurity.backend.model.Zone;
 import com.banksecurity.backend.model.enums.ZoneType;
 import com.banksecurity.backend.repository.CameraRepository;
 import com.banksecurity.backend.repository.ZoneRepository;
+import com.banksecurity.backend.security.UserPrincipal;
 import com.banksecurity.backend.service.AuditLogService;
 import com.banksecurity.backend.service.ZoneService;
 import com.banksecurity.backend.util.ValidationUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,93 +38,129 @@ public class ZoneServiceImpl implements ZoneService {
     @Override
     @Transactional
     public ZoneResponse createZone(ZoneRequest request) {
-        // Vérifier que la caméra existe
-        Camera camera = cameraRepository.findById(request.getCameraId())
-                .orElseThrow(() -> new ResourceNotFoundException("Caméra", "id", request.getCameraId()));
+        try {
+            Camera camera = cameraRepository.findById(request.getCameraId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Caméra", "id", request.getCameraId()));
 
-        // Valider les points du polygone
-        if (!ValidationUtils.isValidPolygonPoints(request.getPoints())) {
-            throw new BadRequestException("Points du polygone invalides. Format attendu: [[x1,y1],[x2,y2],...]");
+            if (!ValidationUtils.isValidPolygonPoints(request.getPoints())) {
+                throw new BadRequestException("Points du polygone invalides. Format attendu: [[x1,y1],[x2,y2],...]");
+            }
+
+            if (zoneRepository.existsByCameraIdAndName(request.getCameraId(), request.getName())) {
+                throw new ConflictException("Une zone avec ce nom existe déjà pour cette caméra: " + request.getName());
+            }
+
+            Zone zone = Zone.builder()
+                    .name(request.getName())
+                    .camera(camera)
+                    .points(request.getPoints())
+                    .type(request.getType())
+                    .description(request.getDescription())
+                    .sensitivity(request.getSensitivity() != null ? request.getSensitivity() : 50)
+                    .isActive(true)
+                    .build();
+
+            zone = zoneRepository.save(zone);
+
+            auditLogService.logAction(null, "CREATE_ZONE",
+                    "Création zone: " + zone.getName() + " pour caméra: " + camera.getName());
+            log.info("Zone créée: {}", zone.getName());
+
+            return mapToResponse(zone);
+
+        } catch (ConflictException e) {
+            throw e;
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la création de la zone: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la création de la zone: " + request.getName(), e);
         }
-
-        // ✅ Utilisation de ConflictException
-        if (zoneRepository.existsByCameraIdAndName(request.getCameraId(), request.getName())) {
-            throw new ConflictException("Une zone avec ce nom existe déjà pour cette caméra: " + request.getName());
-        }
-
-        Zone zone = Zone.builder()
-                .name(request.getName())
-                .camera(camera)
-                .points(request.getPoints())
-                .type(request.getType())
-                .description(request.getDescription())
-                .sensitivity(request.getSensitivity() != null ? request.getSensitivity() : 50)
-                .isActive(true)
-                .build();
-
-        zone = zoneRepository.save(zone);
-
-        auditLogService.logAction(null, "CREATE_ZONE",
-                "Création zone: " + zone.getName() + " pour caméra: " + camera.getName());
-        log.info("Zone créée: {}", zone.getName());
-
-        return mapToResponse(zone);
     }
 
     @Override
     @Transactional
     public ZoneResponse updateZone(UUID id, ZoneRequest request) {
-        Zone zone = zoneRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
+        try {
+            Zone zone = zoneRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
 
-        if (request.getCameraId() != null && !request.getCameraId().equals(zone.getCamera().getId())) {
-            Camera camera = cameraRepository.findById(request.getCameraId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Caméra", "id", request.getCameraId()));
-            zone.setCamera(camera);
-        }
-
-        // ✅ Utilisation de ConflictException
-        if (!zone.getName().equals(request.getName()) &&
-                zoneRepository.existsByCameraIdAndName(request.getCameraId(), request.getName())) {
-            throw new ConflictException("Une zone avec ce nom existe déjà pour cette caméra: " + request.getName());
-        }
-
-        zone.setName(request.getName());
-        zone.setPoints(request.getPoints());
-        zone.setType(request.getType());
-        zone.setDescription(request.getDescription());
-
-        if (request.getSensitivity() != null) {
-            if (!ValidationUtils.isValidSensitivity(request.getSensitivity())) {
-                throw new BadRequestException("La sensibilité doit être entre 0 et 100");
+            if (request.getCameraId() != null && !request.getCameraId().equals(zone.getCamera().getId())) {
+                Camera camera = cameraRepository.findById(request.getCameraId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Caméra", "id", request.getCameraId()));
+                zone.setCamera(camera);
             }
-            zone.setSensitivity(request.getSensitivity());
+
+            if (!zone.getName().equals(request.getName()) &&
+                    zoneRepository.existsByCameraIdAndName(request.getCameraId(), request.getName())) {
+                throw new ConflictException("Une zone avec ce nom existe déjà pour cette caméra: " + request.getName());
+            }
+
+            zone.setName(request.getName());
+            zone.setPoints(request.getPoints());
+            zone.setType(request.getType());
+            zone.setDescription(request.getDescription());
+
+            if (request.getSensitivity() != null) {
+                if (!ValidationUtils.isValidSensitivity(request.getSensitivity())) {
+                    throw new BadRequestException("La sensibilité doit être entre 0 et 100");
+                }
+                zone.setSensitivity(request.getSensitivity());
+            }
+
+            zone = zoneRepository.save(zone);
+
+            auditLogService.logAction(null, "UPDATE_ZONE", "Mise à jour zone: " + zone.getName());
+
+            return mapToResponse(zone);
+
+        } catch (ConflictException e) {
+            throw e;
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la mise à jour de la zone: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la mise à jour de la zone: " + request.getName(), e);
         }
-
-        zone = zoneRepository.save(zone);
-
-        auditLogService.logAction(null, "UPDATE_ZONE", "Mise à jour zone: " + zone.getName());
-
-        return mapToResponse(zone);
     }
 
     @Override
     @Transactional
     public void deleteZone(UUID id) {
-        Zone zone = zoneRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
+        // ✅ Utilisation de ForbiddenException
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
+            throw new ForbiddenException("Vous n'avez pas les permissions pour supprimer une zone");
+        }
 
-        zoneRepository.delete(zone);
+        try {
+            Zone zone = zoneRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
 
-        auditLogService.logAction(null, "DELETE_ZONE", "Suppression zone: " + zone.getName());
-        log.info("Zone supprimée: {}", zone.getName());
+            zoneRepository.delete(zone);
+
+            auditLogService.logAction(null, "DELETE_ZONE", "Suppression zone: " + zone.getName());
+            log.info("Zone supprimée: {}", zone.getName());
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la suppression de la zone: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la suppression de la zone: " + id, e);
+        }
     }
 
     @Override
     public ZoneResponse getZoneById(UUID id) {
-        Zone zone = zoneRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
-        return mapToResponse(zone);
+        try {
+            Zone zone = zoneRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
+            return mapToResponse(zone);
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la récupération de la zone: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la récupération de la zone: " + id, e);
+        }
     }
 
     @Override
@@ -147,25 +187,38 @@ public class ZoneServiceImpl implements ZoneService {
     @Override
     @Transactional
     public ZoneResponse toggleZoneStatus(UUID id, boolean isActive) {
-        Zone zone = zoneRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
+        try {
+            Zone zone = zoneRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
 
-        zone.setIsActive(isActive);
-        zone = zoneRepository.save(zone);
+            zone.setIsActive(isActive);
+            zone = zoneRepository.save(zone);
 
-        auditLogService.logAction(null, "TOGGLE_ZONE_STATUS",
-                "Statut zone " + zone.getName() + " -> " + (isActive ? "active" : "inactive"));
+            auditLogService.logAction(null, "TOGGLE_ZONE_STATUS",
+                    "Statut zone " + zone.getName() + " -> " + (isActive ? "active" : "inactive"));
 
-        return mapToResponse(zone);
+            return mapToResponse(zone);
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors du changement de statut de la zone: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors du changement de statut de la zone: " + id, e);
+        }
     }
 
     @Override
     public boolean isPointInZone(UUID zoneId, double x, double y) {
-        Zone zone = zoneRepository.findById(zoneId)
-                .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", zoneId));
+        try {
+            Zone zone = zoneRepository.findById(zoneId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", zoneId));
 
-        // Implémentation de l'algorithme Point-in-Polygon
-        return isPointInPolygon(x, y, parsePoints(zone.getPoints()));
+            return isPointInPolygon(x, y, parsePoints(zone.getPoints()));
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la vérification du point dans la zone: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la vérification du point dans la zone: " + zoneId, e);
+        }
     }
 
     @Override
@@ -180,9 +233,6 @@ public class ZoneServiceImpl implements ZoneService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Algorithme Point-in-Polygon (Ray Casting)
-     */
     private boolean isPointInPolygon(double x, double y, double[][] polygon) {
         boolean inside = false;
         int j = polygon.length - 1;
@@ -199,12 +249,8 @@ public class ZoneServiceImpl implements ZoneService {
         return inside;
     }
 
-    /**
-     * Parse les points du polygone depuis la chaîne JSON
-     */
     private double[][] parsePoints(String pointsJson) {
         try {
-            // Format: "[[x1,y1],[x2,y2],...]"
             String[] pointStrings = pointsJson.replaceAll("[\\[\\]]", "").split(",");
             double[][] points = new double[pointStrings.length / 2][2];
 
@@ -214,9 +260,9 @@ public class ZoneServiceImpl implements ZoneService {
             }
 
             return points;
-        } catch (Exception e) {
-            log.error("Erreur lors du parsing des points: {}", e.getMessage());
-            return new double[0][0];
+        } catch (NumberFormatException e) {
+            log.error("Erreur de parsing des points: {}", pointsJson, e);
+            throw new BadRequestException("Format de points invalide: " + pointsJson);
         }
     }
 

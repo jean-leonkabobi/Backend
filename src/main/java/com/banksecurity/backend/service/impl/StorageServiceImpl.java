@@ -30,12 +30,22 @@ public class StorageServiceImpl implements StorageService {
 
     @Override
     public String saveImage(MultipartFile file) throws IOException {
-        return storageConfig.saveImage(file);
+        try {
+            return storageConfig.saveImage(file);
+        } catch (IOException e) {
+            log.error("Erreur lors de la sauvegarde de l'image: {}", e.getMessage(), e);
+            throw new BadRequestException("Erreur lors de la sauvegarde de l'image", e);
+        }
     }
 
     @Override
     public String saveVideo(MultipartFile file) throws IOException {
-        return storageConfig.saveVideo(file);
+        try {
+            return storageConfig.saveVideo(file);
+        } catch (IOException e) {
+            log.error("Erreur lors de la sauvegarde de la vidéo: {}", e.getMessage(), e);
+            throw new BadRequestException("Erreur lors de la sauvegarde de la vidéo", e);
+        }
     }
 
     @Override
@@ -64,8 +74,13 @@ public class StorageServiceImpl implements StorageService {
             } else {
                 throw new ResourceNotFoundException("Image", "filename", filename);
             }
+        } catch (ResourceNotFoundException e) {
+            throw e;
         } catch (MalformedURLException e) {
-            throw new BadRequestException("Chemin d'image invalide: " + filename);
+            throw new BadRequestException("Chemin d'image invalide: " + filename, e);
+        } catch (Exception e) {
+            log.error("Erreur lors du chargement de l'image: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors du chargement de l'image: " + filename, e);
         }
     }
 
@@ -80,8 +95,13 @@ public class StorageServiceImpl implements StorageService {
             } else {
                 throw new ResourceNotFoundException("Vidéo", "filename", filename);
             }
+        } catch (ResourceNotFoundException e) {
+            throw e;
         } catch (MalformedURLException e) {
-            throw new BadRequestException("Chemin de vidéo invalide: " + filename);
+            throw new BadRequestException("Chemin de vidéo invalide: " + filename, e);
+        } catch (Exception e) {
+            log.error("Erreur lors du chargement de la vidéo: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors du chargement de la vidéo: " + filename, e);
         }
     }
 
@@ -109,12 +129,8 @@ public class StorageServiceImpl implements StorageService {
 
     @Override
     public void cleanupExpiredFiles() {
-        // Nettoyer les images de plus de 90 jours
         cleanupDirectory(storageConfig.getImagesPath(), 90);
-
-        // Nettoyer les vidéos de plus de 30 jours
         cleanupDirectory(storageConfig.getVideosPath(), 30);
-
         log.info("Nettoyage des fichiers expirés effectué");
     }
 
@@ -127,7 +143,6 @@ public class StorageServiceImpl implements StorageService {
 
             LocalDateTime cutoff = LocalDateTime.now().minusDays(daysToKeep);
 
-            // Utilisation de try-with-resources pour fermer le Stream automatiquement
             try (Stream<Path> files = Files.list(directory)) {
                 files.filter(Files::isRegularFile)
                         .forEach(file -> {

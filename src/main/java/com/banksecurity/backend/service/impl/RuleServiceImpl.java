@@ -3,18 +3,22 @@ package com.banksecurity.backend.service.impl;
 import com.banksecurity.backend.dto.request.RuleRequest;
 import com.banksecurity.backend.dto.response.RuleResponse;
 import com.banksecurity.backend.exception.BadRequestException;
+import com.banksecurity.backend.exception.ForbiddenException;
 import com.banksecurity.backend.exception.ResourceNotFoundException;
 import com.banksecurity.backend.model.Rule;
 import com.banksecurity.backend.model.Zone;
 import com.banksecurity.backend.model.enums.RuleType;
 import com.banksecurity.backend.repository.RuleRepository;
 import com.banksecurity.backend.repository.ZoneRepository;
+import com.banksecurity.backend.security.UserPrincipal;
 import com.banksecurity.backend.service.AuditLogService;
 import com.banksecurity.backend.service.RuleService;
 import com.banksecurity.backend.util.ValidationUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,12 +42,10 @@ public class RuleServiceImpl implements RuleService {
     @Override
     @Transactional
     public RuleResponse createRule(RuleRequest request) {
-        // Valider la priorité
         if (request.getPriority() != null && !ValidationUtils.isValidPriority(request.getPriority())) {
             throw new BadRequestException("La priorité doit être entre 1 et 10");
         }
 
-        // Valider la sensibilité
         if (request.getSensitivity() != null && !ValidationUtils.isValidSensitivity(request.getSensitivity())) {
             throw new BadRequestException("La sensibilité doit être entre 0 et 100");
         }
@@ -59,7 +61,6 @@ public class RuleServiceImpl implements RuleService {
                 .isActive(true)
                 .build();
 
-        // Associer la zone si fournie
         if (request.getZoneId() != null) {
             Zone zone = zoneRepository.findById(request.getZoneId())
                     .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", request.getZoneId()));
@@ -77,56 +78,82 @@ public class RuleServiceImpl implements RuleService {
     @Override
     @Transactional
     public RuleResponse updateRule(UUID id, RuleRequest request) {
-        Rule rule = ruleRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
+        try {
+            Rule rule = ruleRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
 
-        rule.setName(request.getName());
-        rule.setType(request.getType());
-        rule.setParameters(request.getParameters());
-        rule.setThresholdTime(request.getThresholdTime());
-        rule.setDescription(request.getDescription());
+            rule.setName(request.getName());
+            rule.setType(request.getType());
+            rule.setParameters(request.getParameters());
+            rule.setThresholdTime(request.getThresholdTime());
+            rule.setDescription(request.getDescription());
 
-        if (request.getSensitivity() != null) {
-            rule.setSensitivity(request.getSensitivity());
-        }
-
-        if (request.getPriority() != null) {
-            rule.setPriority(request.getPriority());
-        }
-
-        // Mettre à jour la zone si changée
-        if (request.getZoneId() != null) {
-            if (rule.getZone() == null || !rule.getZone().getId().equals(request.getZoneId())) {
-                Zone zone = zoneRepository.findById(request.getZoneId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", request.getZoneId()));
-                rule.setZone(zone);
+            if (request.getSensitivity() != null) {
+                rule.setSensitivity(request.getSensitivity());
             }
+
+            if (request.getPriority() != null) {
+                rule.setPriority(request.getPriority());
+            }
+
+            if (request.getZoneId() != null) {
+                if (rule.getZone() == null || !rule.getZone().getId().equals(request.getZoneId())) {
+                    Zone zone = zoneRepository.findById(request.getZoneId())
+                            .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", request.getZoneId()));
+                    rule.setZone(zone);
+                }
+            }
+
+            rule = ruleRepository.save(rule);
+
+            auditLogService.logAction(null, "UPDATE_RULE", "Mise à jour règle: " + rule.getName());
+
+            return mapToResponse(rule);
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la mise à jour de la règle: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la mise à jour de la règle: " + id, e);
         }
-
-        rule = ruleRepository.save(rule);
-
-        auditLogService.logAction(null, "UPDATE_RULE", "Mise à jour règle: " + rule.getName());
-
-        return mapToResponse(rule);
     }
 
     @Override
     @Transactional
     public void deleteRule(UUID id) {
-        Rule rule = ruleRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
+        // ✅ Utilisation de ForbiddenException
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
+            throw new ForbiddenException("Vous n'avez pas les permissions pour supprimer une règle");
+        }
 
-        ruleRepository.delete(rule);
+        try {
+            Rule rule = ruleRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
 
-        auditLogService.logAction(null, "DELETE_RULE", "Suppression règle: " + rule.getName());
-        log.info("Règle supprimée: {}", rule.getName());
+            ruleRepository.delete(rule);
+
+            auditLogService.logAction(null, "DELETE_RULE", "Suppression règle: " + rule.getName());
+            log.info("Règle supprimée: {}", rule.getName());
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la suppression de la règle: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la suppression de la règle: " + id, e);
+        }
     }
 
     @Override
     public RuleResponse getRuleById(UUID id) {
-        Rule rule = ruleRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
-        return mapToResponse(rule);
+        try {
+            Rule rule = ruleRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
+            return mapToResponse(rule);
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la récupération de la règle: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la récupération de la règle: " + id, e);
+        }
     }
 
     @Override
@@ -153,49 +180,62 @@ public class RuleServiceImpl implements RuleService {
     @Override
     @Transactional
     public RuleResponse toggleRuleStatus(UUID id, boolean isActive) {
-        Rule rule = ruleRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
+        try {
+            Rule rule = ruleRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
 
-        rule.setIsActive(isActive);
-        rule = ruleRepository.save(rule);
+            rule.setIsActive(isActive);
+            rule = ruleRepository.save(rule);
 
-        auditLogService.logAction(null, "TOGGLE_RULE_STATUS",
-                "Statut règle " + rule.getName() + " -> " + (isActive ? "active" : "inactive"));
+            auditLogService.logAction(null, "TOGGLE_RULE_STATUS",
+                    "Statut règle " + rule.getName() + " -> " + (isActive ? "active" : "inactive"));
 
-        return mapToResponse(rule);
+            return mapToResponse(rule);
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors du changement de statut de la règle: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors du changement de statut de la règle: " + id, e);
+        }
     }
 
     // ==================== ÉVALUATION DES RÈGLES ====================
 
     @Override
     public boolean evaluateRule(UUID ruleId, Object context) {
-        Rule rule = ruleRepository.findById(ruleId)
-                .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", ruleId));
+        try {
+            Rule rule = ruleRepository.findById(ruleId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", ruleId));
 
-        if (!rule.getIsActive()) {
-            return false;
-        }
-
-        // Évaluation basée sur le type de règle
-        switch (rule.getType()) {
-            case INTRUSION:
-                return evaluateIntrusionRule(rule, context);
-            case PRESENCE_PROLONGEE:
-                return evaluatePresenceRule(rule, context);
-            case OBJET_SUSPECT:
-                return evaluateObjectRule(rule, context);
-            case SKIMMER:
-                return evaluateSkimmerRule(rule, context);
-            case ARME:
-                return evaluateWeaponRule(rule, context);
-            case CHUTE:
-                return evaluateFallRule(rule, context);
-            case RODEUR:
-                return evaluateLoiteringRule(rule, context);
-            case MASQUE:
-                return evaluateMaskRule(rule, context);
-            default:
+            if (!rule.getIsActive()) {
                 return false;
+            }
+
+            switch (rule.getType()) {
+                case INTRUSION:
+                    return evaluateIntrusionRule(rule, context);
+                case PRESENCE_PROLONGEE:
+                    return evaluatePresenceRule(rule, context);
+                case OBJET_SUSPECT:
+                    return evaluateObjectRule(rule, context);
+                case SKIMMER:
+                    return evaluateSkimmerRule(rule, context);
+                case ARME:
+                    return evaluateWeaponRule(rule, context);
+                case CHUTE:
+                    return evaluateFallRule(rule, context);
+                case RODEUR:
+                    return evaluateLoiteringRule(rule, context);
+                case MASQUE:
+                    return evaluateMaskRule(rule, context);
+                default:
+                    return false;
+            }
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de l'évaluation de la règle: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de l'évaluation de la règle: " + ruleId, e);
         }
     }
 
@@ -213,10 +253,6 @@ public class RuleServiceImpl implements RuleService {
 
     // ==================== MÉTHODES DE DÉTECTION ====================
 
-    /**
-     * Détection d'intrusion dans une zone restreinte
-     * Contexte attendu: Map avec "personDetected", "zoneId", "confidence"
-     */
     private boolean evaluateIntrusionRule(Rule rule, Object context) {
         if (!(context instanceof Map)) {
             log.warn("Contexte invalide pour la détection d'intrusion: {}", context);
@@ -226,20 +262,17 @@ public class RuleServiceImpl implements RuleService {
         @SuppressWarnings("unchecked")
         Map<String, Object> ctx = (Map<String, Object>) context;
 
-        // Vérifier si une personne est détectée
         Boolean personDetected = (Boolean) ctx.get("personDetected");
         if (personDetected == null || !personDetected) {
             return false;
         }
 
-        // Vérifier la confiance de détection
         Double confidence = getDoubleValue(ctx.get("confidence"));
         double threshold = getSensitivityThreshold(rule.getSensitivity());
         if (confidence != null && confidence < threshold) {
             return false;
         }
 
-        // Vérifier si l'intrusion est dans la zone de la règle
         if (rule.getZone() != null) {
             String detectedZoneId = (String) ctx.get("zoneId");
             if (detectedZoneId != null && !detectedZoneId.equals(rule.getZone().getId().toString())) {
@@ -251,10 +284,6 @@ public class RuleServiceImpl implements RuleService {
         return true;
     }
 
-    /**
-     * Détection de présence prolongée
-     * Contexte attendu: Long (temps en secondes) ou Map avec "presenceTime"
-     */
     private boolean evaluatePresenceRule(Rule rule, Object context) {
         long presenceTime = 0;
 
@@ -269,7 +298,6 @@ public class RuleServiceImpl implements RuleService {
             }
         }
 
-        // Vérifier si le temps de présence dépasse le seuil
         if (rule.getThresholdTime() != null) {
             boolean exceeded = presenceTime >= rule.getThresholdTime();
             if (exceeded) {
@@ -282,10 +310,6 @@ public class RuleServiceImpl implements RuleService {
         return false;
     }
 
-    /**
-     * Détection d'objet suspect (colis abandonné, etc.)
-     * Contexte attendu: Map avec "objectClass", "confidence", "stationaryTime"
-     */
     private boolean evaluateObjectRule(Rule rule, Object context) {
         if (!(context instanceof Map)) {
             return false;
@@ -294,13 +318,11 @@ public class RuleServiceImpl implements RuleService {
         @SuppressWarnings("unchecked")
         Map<String, Object> ctx = (Map<String, Object>) context;
 
-        // Classes d'objets suspects
         String objectClass = (String) ctx.get("objectClass");
         if (objectClass == null) {
             return false;
         }
 
-        // Vérifier si l'objet est dans les classes suspectes
         List<String> suspiciousClasses = List.of("backpack", "suitcase", "bag", "package");
         boolean isSuspicious = suspiciousClasses.stream()
                 .anyMatch(sc -> objectClass.toLowerCase().contains(sc.toLowerCase()));
@@ -309,14 +331,12 @@ public class RuleServiceImpl implements RuleService {
             return false;
         }
 
-        // Vérifier la confiance
         Double confidence = getDoubleValue(ctx.get("confidence"));
         double threshold = getSensitivityThreshold(rule.getSensitivity());
         if (confidence != null && confidence < threshold) {
             return false;
         }
 
-        // Vérifier si l'objet est stationnaire depuis un certain temps
         Long stationaryTime = getLongValue(ctx.get("stationaryTime"));
         if (rule.getThresholdTime() != null && stationaryTime != null) {
             if (stationaryTime < rule.getThresholdTime()) {
@@ -328,10 +348,6 @@ public class RuleServiceImpl implements RuleService {
         return true;
     }
 
-    /**
-     * Détection de skimmer sur les DAB
-     * Contexte attendu: Map avec "objectClass", "location", "confidence"
-     */
     private boolean evaluateSkimmerRule(Rule rule, Object context) {
         if (!(context instanceof Map)) {
             return false;
@@ -340,13 +356,11 @@ public class RuleServiceImpl implements RuleService {
         @SuppressWarnings("unchecked")
         Map<String, Object> ctx = (Map<String, Object>) context;
 
-        // Vérifier la classe de l'objet détecté
         String objectClass = (String) ctx.get("objectClass");
         if (objectClass == null) {
             return false;
         }
 
-        // Classes suspectes pour un skimmer
         boolean isSkimmer = objectClass.toLowerCase().contains("skimmer") ||
                 objectClass.toLowerCase().contains("device") ||
                 objectClass.toLowerCase().contains("card_reader");
@@ -355,7 +369,6 @@ public class RuleServiceImpl implements RuleService {
             return false;
         }
 
-        // Vérifier la confiance
         Double confidence = getDoubleValue(ctx.get("confidence"));
         double threshold = getSensitivityThreshold(rule.getSensitivity());
         if (confidence != null && confidence < threshold) {
@@ -366,10 +379,6 @@ public class RuleServiceImpl implements RuleService {
         return true;
     }
 
-    /**
-     * Détection d'arme
-     * Contexte attendu: Map avec "objectClass", "confidence"
-     */
     private boolean evaluateWeaponRule(Rule rule, Object context) {
         if (!(context instanceof Map)) {
             return false;
@@ -378,7 +387,6 @@ public class RuleServiceImpl implements RuleService {
         @SuppressWarnings("unchecked")
         Map<String, Object> ctx = (Map<String, Object>) context;
 
-        // Classes d'armes
         String objectClass = (String) ctx.get("objectClass");
         if (objectClass == null) {
             return false;
@@ -392,7 +400,6 @@ public class RuleServiceImpl implements RuleService {
             return false;
         }
 
-        // Vérifier la confiance
         Double confidence = getDoubleValue(ctx.get("confidence"));
         double threshold = getSensitivityThreshold(rule.getSensitivity());
         if (confidence != null && confidence < threshold) {
@@ -403,10 +410,6 @@ public class RuleServiceImpl implements RuleService {
         return true;
     }
 
-    /**
-     * Détection de chute de personne
-     * Contexte attendu: Map avec "fallDetected", "confidence", "duration"
-     */
     private boolean evaluateFallRule(Rule rule, Object context) {
         if (!(context instanceof Map)) {
             return false;
@@ -415,20 +418,17 @@ public class RuleServiceImpl implements RuleService {
         @SuppressWarnings("unchecked")
         Map<String, Object> ctx = (Map<String, Object>) context;
 
-        // Vérifier si une chute est détectée
         Boolean fallDetected = (Boolean) ctx.get("fallDetected");
         if (fallDetected == null || !fallDetected) {
             return false;
         }
 
-        // Vérifier la confiance
         Double confidence = getDoubleValue(ctx.get("confidence"));
         double threshold = getSensitivityThreshold(rule.getSensitivity());
         if (confidence != null && confidence < threshold) {
             return false;
         }
 
-        // Vérifier si la personne reste au sol depuis un certain temps
         Long duration = getLongValue(ctx.get("duration"));
         if (rule.getThresholdTime() != null && duration != null) {
             if (duration < rule.getThresholdTime()) {
@@ -440,10 +440,6 @@ public class RuleServiceImpl implements RuleService {
         return true;
     }
 
-    /**
-     * Détection de rôdeur (mouvements suspects)
-     * Contexte attendu: Map avec "trajectory", "loiteringTime", "movementPattern"
-     */
     private boolean evaluateLoiteringRule(Rule rule, Object context) {
         if (!(context instanceof Map)) {
             return false;
@@ -452,7 +448,6 @@ public class RuleServiceImpl implements RuleService {
         @SuppressWarnings("unchecked")
         Map<String, Object> ctx = (Map<String, Object>) context;
 
-        // Vérifier le temps de rôdeur
         Long loiteringTime = getLongValue(ctx.get("loiteringTime"));
         if (rule.getThresholdTime() != null && loiteringTime != null) {
             if (loiteringTime < rule.getThresholdTime()) {
@@ -460,7 +455,6 @@ public class RuleServiceImpl implements RuleService {
             }
         }
 
-        // Vérifier le pattern de mouvement
         String movementPattern = (String) ctx.get("movementPattern");
         if (movementPattern != null) {
             List<String> suspiciousPatterns = List.of("circular", "repetitive", "zigzag");
@@ -474,7 +468,6 @@ public class RuleServiceImpl implements RuleService {
             }
         }
 
-        // Vérifier les allers-retours
         Integer directionChanges = getIntegerValue(ctx.get("directionChanges"));
         if (directionChanges != null && rule.getParameters() != null) {
             try {
@@ -494,10 +487,6 @@ public class RuleServiceImpl implements RuleService {
                 loiteringTime >= rule.getThresholdTime();
     }
 
-    /**
-     * Détection de masque
-     * Contexte attendu: Map avec "maskDetected", "confidence"
-     */
     private boolean evaluateMaskRule(Rule rule, Object context) {
         if (!(context instanceof Map)) {
             return false;
@@ -506,13 +495,11 @@ public class RuleServiceImpl implements RuleService {
         @SuppressWarnings("unchecked")
         Map<String, Object> ctx = (Map<String, Object>) context;
 
-        // Vérifier si un masque est détecté
         Boolean maskDetected = (Boolean) ctx.get("maskDetected");
         if (maskDetected == null || !maskDetected) {
             return false;
         }
 
-        // Vérifier la confiance
         Double confidence = getDoubleValue(ctx.get("confidence"));
         double threshold = getSensitivityThreshold(rule.getSensitivity());
         if (confidence != null && confidence < threshold) {
@@ -525,24 +512,13 @@ public class RuleServiceImpl implements RuleService {
 
     // ==================== MÉTHODES UTILITAIRES ====================
 
-    /**
-     * Calcule le seuil de confiance basé sur la sensibilité
-     * Sensibilité élevée = seuil plus bas = détection plus sensible
-     */
     private double getSensitivityThreshold(Integer sensitivity) {
         if (sensitivity == null) {
-            return 0.5; // Seuil par défaut
+            return 0.5;
         }
-
-        // Convertir la sensibilité (0-100) en seuil de confiance (0.0-1.0)
-        // Sensibilité 100 -> seuil 0.1 (très sensible)
-        // Sensibilité 0 -> seuil 0.9 (peu sensible)
         return 1.0 - (sensitivity / 100.0) * 0.8;
     }
 
-    /**
-     * Convertit un objet en Double de manière sécurisée
-     */
     private Double getDoubleValue(Object value) {
         if (value instanceof Number) {
             return ((Number) value).doubleValue();
@@ -557,9 +533,6 @@ public class RuleServiceImpl implements RuleService {
         return null;
     }
 
-    /**
-     * Convertit un objet en Long de manière sécurisée
-     */
     private Long getLongValue(Object value) {
         if (value instanceof Number) {
             return ((Number) value).longValue();
@@ -574,9 +547,6 @@ public class RuleServiceImpl implements RuleService {
         return null;
     }
 
-    /**
-     * Convertit un objet en Integer de manière sécurisée
-     */
     private Integer getIntegerValue(Object value) {
         if (value instanceof Number) {
             return ((Number) value).intValue();
@@ -591,9 +561,6 @@ public class RuleServiceImpl implements RuleService {
         return null;
     }
 
-    /**
-     * Convertit une entité Rule en RuleResponse
-     */
     private RuleResponse mapToResponse(Rule rule) {
         return RuleResponse.builder()
                 .id(rule.getId())

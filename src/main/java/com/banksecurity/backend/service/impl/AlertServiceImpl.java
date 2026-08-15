@@ -56,21 +56,18 @@ public class AlertServiceImpl implements AlertService {
                 .videoPath(request.getVideoPath())
                 .build();
 
-        // Associer la caméra
         if (request.getCameraId() != null) {
             Camera camera = cameraRepository.findById(request.getCameraId())
                     .orElseThrow(() -> new ResourceNotFoundException("Caméra", "id", request.getCameraId()));
             alert.setCamera(camera);
         }
 
-        // Associer la zone
         if (request.getZoneId() != null) {
             Zone zone = zoneRepository.findById(request.getZoneId())
                     .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", request.getZoneId()));
             alert.setZone(zone);
         }
 
-        // Associer la règle
         if (request.getRuleId() != null) {
             Rule rule = ruleRepository.findById(request.getRuleId())
                     .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", request.getRuleId()));
@@ -79,15 +76,12 @@ public class AlertServiceImpl implements AlertService {
 
         alert = alertRepository.save(alert);
 
-        // Journaliser l'action
         auditLogService.logAction(null, "ALERT_CREATED",
                 "Alerte créée: " + alert.getType() + " - " + alert.getSeverity());
 
-        // Envoyer l'alerte en temps réel via WebSocket
         AlertResponse response = mapToResponse(alert);
         webSocketService.broadcastAlert(response);
 
-        // Envoyer un email pour les alertes critiques
         if (alert.getSeverity() == AlertSeverity.CRITICAL || alert.getSeverity() == AlertSeverity.HIGH) {
             emailService.sendAlertEmail(alert, null);
         }
@@ -100,30 +94,44 @@ public class AlertServiceImpl implements AlertService {
     @Override
     @Transactional
     public AlertResponse updateAlertStatus(UUID id, AlertStatusUpdateRequest request) {
-        Alert alert = alertRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", id));
+        try {
+            Alert alert = alertRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", id));
 
-        alert.setStatus(request.getStatus());
+            alert.setStatus(request.getStatus());
 
-        if (request.getStatus() == AlertStatus.RESOLVED ||
-                request.getStatus() == AlertStatus.FALSE_ALARM) {
-            alert.setResolvedAt(LocalDateTime.now());
-            alert.setResolutionNotes(request.getResolutionNotes());
+            if (request.getStatus() == AlertStatus.RESOLVED ||
+                    request.getStatus() == AlertStatus.FALSE_ALARM) {
+                alert.setResolvedAt(LocalDateTime.now());
+                alert.setResolutionNotes(request.getResolutionNotes());
+            }
+
+            alert = alertRepository.save(alert);
+
+            auditLogService.logAction(null, "ALERT_STATUS_UPDATED",
+                    "Alerte " + id + " -> " + request.getStatus());
+
+            return mapToResponse(alert);
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la mise à jour du statut de l'alerte: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la mise à jour du statut de l'alerte: " + id, e);
         }
-
-        alert = alertRepository.save(alert);
-
-        auditLogService.logAction(null, "ALERT_STATUS_UPDATED",
-                "Alerte " + id + " -> " + request.getStatus());
-
-        return mapToResponse(alert);
     }
 
     @Override
     public AlertResponse getAlertById(UUID id) {
-        Alert alert = alertRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", id));
-        return mapToResponse(alert);
+        try {
+            Alert alert = alertRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", id));
+            return mapToResponse(alert);
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la récupération de l'alerte: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la récupération de l'alerte: " + id, e);
+        }
     }
 
     @Override
@@ -178,36 +186,52 @@ public class AlertServiceImpl implements AlertService {
     @Override
     @Transactional
     public AlertResponse escalateAlert(UUID id) {
-        Alert alert = alertRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", id));
+        try {
+            Alert alert = alertRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", id));
 
-        alert.setStatus(AlertStatus.ESCALATED);
-        alert = alertRepository.save(alert);
+            alert.setStatus(AlertStatus.ESCALATED);
+            alert = alertRepository.save(alert);
 
-        auditLogService.logAction(null, "ALERT_ESCALATED", "Alerte escaladée: " + id);
+            auditLogService.logAction(null, "ALERT_ESCALATED", "Alerte escaladée: " + id);
 
-        return mapToResponse(alert);
+            return mapToResponse(alert);
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de l'escalade de l'alerte: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de l'escalade de l'alerte: " + id, e);
+        }
     }
 
     @Override
     @Transactional
     public AlertResponse resolveAlert(UUID id, AlertStatus resolutionStatus, String notes) {
-        if (resolutionStatus != AlertStatus.RESOLVED && resolutionStatus != AlertStatus.FALSE_ALARM) {
-            throw new BadRequestException("Le statut de résolution doit être RESOLVED ou FALSE_ALARM");
+        try {
+            if (resolutionStatus != AlertStatus.RESOLVED && resolutionStatus != AlertStatus.FALSE_ALARM) {
+                throw new BadRequestException("Le statut de résolution doit être RESOLVED ou FALSE_ALARM");
+            }
+
+            Alert alert = alertRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", id));
+
+            alert.setStatus(resolutionStatus);
+            alert.setResolvedAt(LocalDateTime.now());
+            alert.setResolutionNotes(notes);
+            alert = alertRepository.save(alert);
+
+            auditLogService.logAction(null, "ALERT_RESOLVED",
+                    "Alerte résolue: " + id + " -> " + resolutionStatus);
+
+            return mapToResponse(alert);
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la résolution de l'alerte: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la résolution de l'alerte: " + id, e);
         }
-
-        Alert alert = alertRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", id));
-
-        alert.setStatus(resolutionStatus);
-        alert.setResolvedAt(LocalDateTime.now());
-        alert.setResolutionNotes(notes);
-        alert = alertRepository.save(alert);
-
-        auditLogService.logAction(null, "ALERT_RESOLVED",
-                "Alerte résolue: " + id + " -> " + resolutionStatus);
-
-        return mapToResponse(alert);
     }
 
     @Override
@@ -228,15 +252,21 @@ public class AlertServiceImpl implements AlertService {
     @Override
     @Transactional
     public String saveAlertImage(UUID alertId, byte[] imageData) {
-        Alert alert = alertRepository.findById(alertId)
-                .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", alertId));
+        try {
+            Alert alert = alertRepository.findById(alertId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", alertId));
 
-        // TODO: Sauvegarder l'image et mettre à jour le chemin
-        String imagePath = "/storage/images/alerts/" + alertId + ".jpg";
-        alert.setImagePath(imagePath);
-        alertRepository.save(alert);
+            String imagePath = "/storage/images/alerts/" + alertId + ".jpg";
+            alert.setImagePath(imagePath);
+            alertRepository.save(alert);
 
-        return imagePath;
+            return imagePath;
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Erreur lors de la sauvegarde de l'image: {}", e.getMessage(), e);
+            throw new ResourceNotFoundException("Erreur lors de la sauvegarde de l'image: " + alertId, e);
+        }
     }
 
     private AlertResponse mapToResponse(Alert alert) {
