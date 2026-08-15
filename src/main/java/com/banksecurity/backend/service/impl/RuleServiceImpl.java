@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -120,7 +121,6 @@ public class RuleServiceImpl implements RuleService {
     @Override
     @Transactional
     public void deleteRule(UUID id) {
-        // ✅ Utilisation de ForbiddenException
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
             throw new ForbiddenException("Vous n'avez pas les permissions pour supprimer une règle");
@@ -249,6 +249,78 @@ public class RuleServiceImpl implements RuleService {
     @Override
     public long countRules() {
         return ruleRepository.count();
+    }
+
+    // ==================== NOUVELLES MÉTHODES UTILISANT LES REPOSITORY ====================
+
+    /**
+     * Récupère les règles inactives
+     */
+    public List<RuleResponse> getInactiveRules() {
+        return ruleRepository.findByIsActiveFalse().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les règles par zone et type
+     */
+    public List<RuleResponse> getRulesByZoneAndType(UUID zoneId, RuleType type) {
+        return ruleRepository.findByZoneIdAndType(zoneId, type).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère une règle avec sa zone
+     */
+    public RuleResponse getRuleWithZone(UUID id) {
+        Rule rule = ruleRepository.findByIdWithZone(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
+        return mapToResponse(rule);
+    }
+
+    /**
+     * Récupère les règles par priorité minimale
+     */
+    public List<RuleResponse> getRulesByPriorityGreaterThan(Integer priority) {
+        return ruleRepository.findByPriorityGreaterThanEqual(priority).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Compte les règles actives par type
+     */
+    public long countActiveRulesByType(RuleType type) {
+        return ruleRepository.countActiveByType(type);
+    }
+
+    /**
+     * Récupère les règles avec un seuil de temps supérieur
+     */
+    public List<RuleResponse> getRulesByThresholdTimeGreaterThan(Integer thresholdTime) {
+        return ruleRepository.findByThresholdTimeGreaterThan(thresholdTime).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère toutes les règles triées par priorité
+     */
+    public List<RuleResponse> getAllRulesOrderedByPriority() {
+        return ruleRepository.findAllOrderByPriorityDesc().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les règles actives avec leurs zones
+     */
+    public List<RuleResponse> getActiveRulesWithZones() {
+        return ruleRepository.findActiveRulesWithZones().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
     }
 
     // ==================== MÉTHODES DE DÉTECTION ====================

@@ -20,7 +20,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -32,6 +34,8 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
+
+    // ==================== MÉTHODES CRUD EXISTANTES ====================
 
     @Override
     @Transactional
@@ -124,7 +128,6 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public void deleteUser(UUID id) {
-        // ✅ Utilisation de ForbiddenException
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
             throw new ForbiddenException("Vous n'avez pas les permissions pour supprimer un utilisateur");
@@ -199,7 +202,6 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public void resetPassword(UUID id, String newPassword) {
-        // ✅ Utilisation de ForbiddenException
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
             throw new ForbiddenException("Vous n'avez pas les permissions pour réinitialiser ce mot de passe");
@@ -263,6 +265,111 @@ public class UserServiceImpl implements UserService {
     public long countUsersByRole(UserRole role) {
         return userRepository.countByRole(role);
     }
+
+    // ==================== NOUVELLES MÉTHODES UTILISANT LES REPOSITORY ====================
+
+    /**
+     * Récupère les utilisateurs actifs
+     */
+    public List<UserResponse> getActiveUsers() {
+        return userRepository.findByIsActiveTrue().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les utilisateurs inactifs
+     */
+    public List<UserResponse> getInactiveUsers() {
+        return userRepository.findByIsActiveFalse().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les comptes verrouillés
+     */
+    public List<UserResponse> getLockedAccounts() {
+        return userRepository.findByAccountLockedTrue().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les utilisateurs qui ne se sont pas connectés depuis X jours
+     */
+    public List<UserResponse> getInactiveUsersSince(int days) {
+        LocalDateTime date = LocalDateTime.now().minusDays(days);
+        return userRepository.findInactiveUsers(date).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère un utilisateur par son token de réinitialisation
+     */
+    public UserResponse getUserByPasswordResetToken(String token) {
+        User user = userRepository.findByPasswordResetToken(token)
+                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "passwordResetToken", token));
+        return mapToResponse(user);
+    }
+
+    /**
+     * Récupère les utilisateurs avec des tentatives de connexion échouées
+     */
+    public List<UserResponse> getUsersWithFailedAttempts(int attempts) {
+        return userRepository.findUsersWithFailedAttempts(attempts).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère tous les utilisateurs triés par date de création
+     */
+    public List<UserResponse> getAllUsersOrderedByCreation() {
+        return userRepository.findAllOrderByCreatedAtDesc().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Vérifie si un email existe
+     */
+    public boolean emailExists(String email) {
+        return userRepository.existsByEmail(email);
+    }
+
+    /**
+     * Récupère un utilisateur par email
+     */
+    public UserResponse getUserByEmail(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "email", email));
+        return mapToResponse(user);
+    }
+
+    /**
+     * Compte les utilisateurs actifs
+     */
+    public long countActiveUsers() {
+        return userRepository.findByIsActiveTrue().size();
+    }
+
+    /**
+     * Compte les utilisateurs inactifs
+     */
+    public long countInactiveUsers() {
+        return userRepository.findByIsActiveFalse().size();
+    }
+
+    /**
+     * Compte les comptes verrouillés
+     */
+    public long countLockedAccounts() {
+        return userRepository.findByAccountLockedTrue().size();
+    }
+
+    // ==================== MÉTHODE DE MAPPING ====================
 
     private UserResponse mapToResponse(User user) {
         return UserResponse.builder()

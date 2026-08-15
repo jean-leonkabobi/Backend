@@ -33,6 +33,8 @@ public class CameraServiceImpl implements CameraService {
     private final CameraRepository cameraRepository;
     private final AuditLogService auditLogService;
 
+    // ==================== MÉTHODES CRUD EXISTANTES ====================
+
     @Override
     @Transactional
     public CameraResponse createCamera(CameraRequest request) {
@@ -129,7 +131,6 @@ public class CameraServiceImpl implements CameraService {
     @Override
     @Transactional
     public void deleteCamera(UUID id) {
-        // ✅ Utilisation de ForbiddenException
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
             throw new ForbiddenException("Vous n'avez pas les permissions pour supprimer une caméra");
@@ -277,6 +278,96 @@ public class CameraServiceImpl implements CameraService {
     public long countCamerasByStatus(CameraStatus status) {
         return cameraRepository.countByStatus(status);
     }
+
+    // ==================== NOUVELLES MÉTHODES UTILISANT LES REPOSITORY ====================
+
+    /**
+     * Récupère les caméras actives en analyse
+     */
+    public List<CameraResponse> getActiveAnalyzingCameras(CameraStatus status) {
+        return cameraRepository.findByStatusAndIsAnalyzingTrue(status).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Recherche des caméras par localisation
+     */
+    public List<CameraResponse> searchCamerasByLocation(String location) {
+        return cameraRepository.findByLocationContainingIgnoreCase(location).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les caméras en erreur
+     */
+    public List<CameraResponse> getCamerasInError() {
+        return cameraRepository.findCamerasInError().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère une caméra avec ses zones
+     */
+    public CameraResponse getCameraWithZones(UUID id) {
+        Camera camera = cameraRepository.findByIdWithZones(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Caméra", "id", id));
+        return mapToResponse(camera);
+    }
+
+    /**
+     * Récupère les caméras en enregistrement
+     */
+    public List<CameraResponse> getRecordingCameras() {
+        return cameraRepository.findByIsRecordingTrue().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les caméras en analyse
+     */
+    public List<CameraResponse> getAnalyzingCameras() {
+        return cameraRepository.findByIsAnalyzingTrue().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Recherche des caméras par modèle
+     */
+    public List<CameraResponse> searchCamerasByModel(String model) {
+        return cameraRepository.findByModelContainingIgnoreCase(model).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère toutes les caméras triées par date de création
+     */
+    public List<CameraResponse> getAllCamerasOrderedByCreation() {
+        return cameraRepository.findAllOrderByCreatedAtDesc().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère le nombre de caméras actives
+     */
+    public long countActiveCameras() {
+        return cameraRepository.countByStatus(CameraStatus.ACTIVE);
+    }
+
+    /**
+     * Récupère le nombre de caméras en erreur
+     */
+    public long countCamerasInError() {
+        return cameraRepository.countByStatus(CameraStatus.ERROR);
+    }
+
+    // ==================== MÉTHODE DE MAPPING ====================
 
     private CameraResponse mapToResponse(Camera camera) {
         return CameraResponse.builder()

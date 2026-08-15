@@ -21,6 +21,10 @@ import com.banksecurity.backend.service.EmailService;
 import com.banksecurity.backend.service.WebSocketService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +45,8 @@ public class AlertServiceImpl implements AlertService {
     private final AuditLogService auditLogService;
     private final EmailService emailService;
     private final WebSocketService webSocketService;
+
+    // ==================== MÉTHODES CRUD EXISTANTES ====================
 
     @Override
     @Transactional
@@ -268,6 +274,100 @@ public class AlertServiceImpl implements AlertService {
             throw new ResourceNotFoundException("Erreur lors de la sauvegarde de l'image: " + alertId, e);
         }
     }
+
+    // ==================== NOUVELLES MÉTHODES UTILISANT LES REPOSITORY ====================
+
+    /**
+     * Récupère les alertes par type
+     */
+    public List<AlertResponse> getAlertsByType(String type) {
+        return alertRepository.findByType(type).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les alertes par règle
+     */
+    public List<AlertResponse> getAlertsByRule(UUID ruleId) {
+        return alertRepository.findByRuleId(ruleId).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les alertes par sévérité et statut
+     */
+    public List<AlertResponse> getAlertsBySeverityAndStatus(AlertSeverity severity, AlertStatus status) {
+        return alertRepository.findBySeverityAndStatus(severity, status).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère une alerte avec tous ses détails
+     */
+    public AlertResponse getAlertWithDetails(UUID id) {
+        Alert alert = alertRepository.findAlertWithDetails(id);
+        if (alert == null) {
+            throw new ResourceNotFoundException("Alerte", "id", id);
+        }
+        return mapToResponse(alert);
+    }
+
+    /**
+     * Récupère les alertes récentes non traitées
+     */
+    public List<AlertResponse> getRecentUnprocessedAlerts(int hours) {
+        LocalDateTime since = LocalDateTime.now().minusHours(hours);
+        return alertRepository.findRecentUnprocessedAlerts(since).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les alertes avec filtres combinés et pagination
+     */
+    public Page<AlertResponse> getAlertsWithFilters(
+            AlertStatus status,
+            AlertSeverity severity,
+            UUID cameraId,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            int page,
+            int size) {
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+
+        return alertRepository.findAlertsWithFilters(status, severity, cameraId, startDate, endDate, pageable)
+                .map(this::mapToResponse);
+    }
+
+    /**
+     * Récupère les alertes par statut avec pagination
+     */
+    public Page<AlertResponse> getAlertsByStatusPaginated(AlertStatus status, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        return alertRepository.findByStatus(status, pageable).map(this::mapToResponse);
+    }
+
+    /**
+     * Récupère les alertes par sévérité avec pagination
+     */
+    public Page<AlertResponse> getAlertsBySeverityPaginated(AlertSeverity severity, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        return alertRepository.findBySeverity(severity, pageable).map(this::mapToResponse);
+    }
+
+    /**
+     * Récupère les alertes par caméra avec pagination
+     */
+    public Page<AlertResponse> getAlertsByCameraPaginated(UUID cameraId, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        return alertRepository.findByCameraId(cameraId, pageable).map(this::mapToResponse);
+    }
+
+    // ==================== MÉTHODE DE MAPPING ====================
 
     private AlertResponse mapToResponse(Alert alert) {
         return AlertResponse.builder()

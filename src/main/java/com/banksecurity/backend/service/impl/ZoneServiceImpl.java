@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -34,6 +35,8 @@ public class ZoneServiceImpl implements ZoneService {
     private final ZoneRepository zoneRepository;
     private final CameraRepository cameraRepository;
     private final AuditLogService auditLogService;
+
+    // ==================== MÉTHODES CRUD EXISTANTES ====================
 
     @Override
     @Transactional
@@ -127,7 +130,6 @@ public class ZoneServiceImpl implements ZoneService {
     @Override
     @Transactional
     public void deleteZone(UUID id) {
-        // ✅ Utilisation de ForbiddenException
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
             throw new ForbiddenException("Vous n'avez pas les permissions pour supprimer une zone");
@@ -232,6 +234,92 @@ public class ZoneServiceImpl implements ZoneService {
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
+
+    // ==================== NOUVELLES MÉTHODES UTILISANT LES REPOSITORY ====================
+
+    /**
+     * Récupère les zones par caméra et type
+     */
+    public List<ZoneResponse> getZonesByCameraAndType(UUID cameraId, ZoneType type) {
+        return zoneRepository.findByCameraIdAndType(cameraId, type).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère une zone avec ses règles
+     */
+    public ZoneResponse getZoneWithRules(UUID id) {
+        Zone zone = zoneRepository.findByIdWithRules(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
+        return mapToResponse(zone);
+    }
+
+    /**
+     * Récupère une zone avec sa caméra
+     */
+    public ZoneResponse getZoneWithCamera(UUID id) {
+        Zone zone = zoneRepository.findByIdWithCamera(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
+        return mapToResponse(zone);
+    }
+
+    /**
+     * Compte les zones par type
+     */
+    public long countZonesByType(ZoneType type) {
+        return zoneRepository.countByType(type);
+    }
+
+    /**
+     * Récupère les zones par sensibilité minimale
+     */
+    public List<ZoneResponse> getZonesBySensitivityGreaterThan(Integer sensitivity) {
+        return zoneRepository.findBySensitivityGreaterThanEqual(sensitivity).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère les zones inactives
+     */
+    public List<ZoneResponse> getInactiveZones() {
+        return zoneRepository.findByIsActiveFalse().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Récupère toutes les zones triées par date de création
+     */
+    public List<ZoneResponse> getAllZonesOrderedByCreation() {
+        return zoneRepository.findAllOrderByCreatedAtDesc().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Vérifie si une zone existe pour une caméra avec un nom donné
+     */
+    public boolean zoneExists(UUID cameraId, String name) {
+        return zoneRepository.existsByCameraIdAndName(cameraId, name);
+    }
+
+    /**
+     * Compte les zones actives
+     */
+    public long countActiveZones() {
+        return zoneRepository.findByIsActiveTrue().size();
+    }
+
+    /**
+     * Compte les zones inactives
+     */
+    public long countInactiveZones() {
+        return zoneRepository.findByIsActiveFalse().size();
+    }
+
+    // ==================== MÉTHODES UTILITAIRES ====================
 
     private boolean isPointInPolygon(double x, double y, double[][] polygon) {
         boolean inside = false;
