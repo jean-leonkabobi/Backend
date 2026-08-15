@@ -1,17 +1,12 @@
 package com.banksecurity.backend.service.impl;
 
+import com.banksecurity.backend.integration.email.EmailClient;
+import com.banksecurity.backend.integration.email.EmailMessage;
 import com.banksecurity.backend.model.Alert;
 import com.banksecurity.backend.model.User;
 import com.banksecurity.backend.service.EmailService;
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -20,71 +15,47 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class EmailServiceImpl implements EmailService {
 
-    private final JavaMailSender mailSender;
-
-    @Value("${spring.mail.username}")
-    private String mailFrom;
+    private final EmailClient emailClient;
 
     @Override
     @Async("notificationExecutor")
     public void sendAlertEmail(Alert alert, byte[] imageData) {
-        try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-
-            helper.setFrom(mailFrom);
-            helper.setTo("security-team@banksecurity.com"); // À configurer
-            helper.setSubject("🚨 Alerte de sécurité - " + alert.getSeverity());
-
-            StringBuilder content = new StringBuilder();
-            content.append("<html><body>");
-            content.append("<h2>Alerte de sécurité</h2>");
-            content.append("<p><strong>Type:</strong> ").append(alert.getType()).append("</p>");
-            content.append("<p><strong>Sévérité:</strong> ").append(alert.getSeverity()).append("</p>");
-            content.append("<p><strong>Statut:</strong> ").append(alert.getStatus()).append("</p>");
-            content.append("<p><strong>Date:</strong> ").append(alert.getCreatedAt()).append("</p>");
-
-            if (alert.getDescription() != null) {
-                content.append("<p><strong>Description:</strong> ").append(alert.getDescription()).append("</p>");
-            }
-
-            if (alert.getDetectionConfidence() != null) {
-                content.append("<p><strong>Confiance:</strong> ").append(alert.getDetectionConfidence()).append("</p>");
-            }
-
-            content.append("</body></html>");
-
-            helper.setText(content.toString(), true);
-
-            // Ajouter l'image en pièce jointe si disponible
-            if (imageData != null && imageData.length > 0) {
-                helper.addAttachment("alert-image.jpg", new ByteArrayResource(imageData));
-            }
-
-            mailSender.send(message);
-            log.info("Email d'alerte envoyé: {} - {}", alert.getType(), alert.getSeverity());
-
-        } catch (MessagingException e) {
-            log.error("Erreur lors de l'envoi de l'email d'alerte", e);
+        if (!emailClient.isConfigured()) {
+            log.warn("Email non configuré. Impossible d'envoyer l'alerte.");
+            return;
         }
+
+        String subject = "🚨 Alerte de sécurité - " + alert.getSeverity();
+        String content = buildAlertEmailContent(alert);
+
+        EmailMessage message = EmailMessage.builder()
+                .to(new String[]{"security-team@banksecurity.com"})
+                .subject(subject)
+                .content(content)
+                .html(true)
+                .build();
+
+        emailClient.sendHtmlEmail(message);
+        log.info("Email d'alerte envoyé: {} - {}", alert.getType(), alert.getSeverity());
     }
 
     @Override
     @Async("notificationExecutor")
     public void sendNotificationEmail(String to, String subject, String content) {
-        try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(mailFrom);
-            message.setTo(to);
-            message.setSubject(subject);
-            message.setText(content);
-
-            mailSender.send(message);
-            log.info("Email de notification envoyé à: {}", to);
-
-        } catch (Exception e) {
-            log.error("Erreur lors de l'envoi de l'email de notification", e);
+        if (!emailClient.isConfigured()) {
+            log.warn("Email non configuré. Impossible d'envoyer la notification.");
+            return;
         }
+
+        EmailMessage message = EmailMessage.builder()
+                .to(new String[]{to})
+                .subject(subject)
+                .content(content)
+                .html(false)
+                .build();
+
+        emailClient.sendSimpleEmail(message);
+        log.info("Email de notification envoyé à: {}", to);
     }
 
     @Override
@@ -164,12 +135,35 @@ public class EmailServiceImpl implements EmailService {
     @Async("notificationExecutor")
     public void sendDailyReportEmail(String to, String reportContent) {
         String subject = "Rapport quotidien de sécurité";
-
         sendNotificationEmail(to, subject, reportContent);
     }
 
     @Override
     public boolean isEmailConfigured() {
-        return mailFrom != null && !mailFrom.isEmpty();
+        return emailClient.isConfigured();
+    }
+
+    /**
+     * Construit le contenu HTML de l'email d'alerte
+     */
+    private String buildAlertEmailContent(Alert alert) {
+        StringBuilder content = new StringBuilder();
+        content.append("<html><body>");
+        content.append("<h2>Alerte de sécurité</h2>");
+        content.append("<p><strong>Type:</strong> ").append(alert.getType()).append("</p>");
+        content.append("<p><strong>Sévérité:</strong> ").append(alert.getSeverity()).append("</p>");
+        content.append("<p><strong>Statut:</strong> ").append(alert.getStatus()).append("</p>");
+        content.append("<p><strong>Date:</strong> ").append(alert.getCreatedAt()).append("</p>");
+
+        if (alert.getDescription() != null) {
+            content.append("<p><strong>Description:</strong> ").append(alert.getDescription()).append("</p>");
+        }
+
+        if (alert.getDetectionConfidence() != null) {
+            content.append("<p><strong>Confiance:</strong> ").append(alert.getDetectionConfidence()).append("</p>");
+        }
+
+        content.append("</body></html>");
+        return content.toString();
     }
 }

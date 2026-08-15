@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
-import java.io.File;
 
 /**
  * Client email pour l'envoi de notifications
