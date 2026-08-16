@@ -13,6 +13,7 @@ import com.banksecurity.backend.repository.ZoneRepository;
 import com.banksecurity.backend.security.UserPrincipal;
 import com.banksecurity.backend.service.AuditLogService;
 import com.banksecurity.backend.service.RuleService;
+import com.banksecurity.backend.util.Constants;
 import com.banksecurity.backend.util.ValidationUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +25,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -43,8 +43,9 @@ public class RuleServiceImpl implements RuleService {
     @Override
     @Transactional
     public RuleResponse createRule(RuleRequest request) {
+        // ✅ Utilisation de Constants.MAX_RULE_PRIORITY
         if (request.getPriority() != null && !ValidationUtils.isValidPriority(request.getPriority())) {
-            throw new BadRequestException("La priorité doit être entre 1 et 10");
+            throw new BadRequestException("La priorité doit être entre 1 et " + Constants.MAX_RULE_PRIORITY);
         }
 
         if (request.getSensitivity() != null && !ValidationUtils.isValidSensitivity(request.getSensitivity())) {
@@ -56,8 +57,9 @@ public class RuleServiceImpl implements RuleService {
                 .type(request.getType())
                 .parameters(request.getParameters())
                 .thresholdTime(request.getThresholdTime())
-                .sensitivity(request.getSensitivity() != null ? request.getSensitivity() : 50)
-                .priority(request.getPriority() != null ? request.getPriority() : 1)
+                .sensitivity(request.getSensitivity() != null ? request.getSensitivity() : Constants.DEFAULT_ZONE_SENSITIVITY)
+                // ✅ Utilisation de Constants.DEFAULT_RULE_PRIORITY
+                .priority(request.getPriority() != null ? request.getPriority() : Constants.DEFAULT_RULE_PRIORITY)
                 .description(request.getDescription())
                 .isActive(true)
                 .build();
@@ -70,7 +72,8 @@ public class RuleServiceImpl implements RuleService {
 
         rule = ruleRepository.save(rule);
 
-        auditLogService.logAction(null, "CREATE_RULE", "Création règle: " + rule.getName());
+        // ✅ Utilisation de Constants.AUDIT_ACTION_CREATE
+        auditLogService.logAction(null, Constants.AUDIT_ACTION_CREATE + "_RULE", "Création règle: " + rule.getName());
         log.info("Règle créée: {}", rule.getName());
 
         return mapToResponse(rule);
@@ -107,7 +110,8 @@ public class RuleServiceImpl implements RuleService {
 
             rule = ruleRepository.save(rule);
 
-            auditLogService.logAction(null, "UPDATE_RULE", "Mise à jour règle: " + rule.getName());
+            // ✅ Utilisation de Constants.AUDIT_ACTION_UPDATE
+            auditLogService.logAction(null, Constants.AUDIT_ACTION_UPDATE + "_RULE", "Mise à jour règle: " + rule.getName());
 
             return mapToResponse(rule);
         } catch (ResourceNotFoundException e) {
@@ -132,7 +136,8 @@ public class RuleServiceImpl implements RuleService {
 
             ruleRepository.delete(rule);
 
-            auditLogService.logAction(null, "DELETE_RULE", "Suppression règle: " + rule.getName());
+            // ✅ Utilisation de Constants.AUDIT_ACTION_DELETE
+            auditLogService.logAction(null, Constants.AUDIT_ACTION_DELETE + "_RULE", "Suppression règle: " + rule.getName());
             log.info("Règle supprimée: {}", rule.getName());
         } catch (ResourceNotFoundException e) {
             throw e;
@@ -253,70 +258,46 @@ public class RuleServiceImpl implements RuleService {
 
     // ==================== NOUVELLES MÉTHODES UTILISANT LES REPOSITORY ====================
 
-    /**
-     * Récupère les règles inactives
-     */
     public List<RuleResponse> getInactiveRules() {
         return ruleRepository.findByIsActiveFalse().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère les règles par zone et type
-     */
     public List<RuleResponse> getRulesByZoneAndType(UUID zoneId, RuleType type) {
         return ruleRepository.findByZoneIdAndType(zoneId, type).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère une règle avec sa zone
-     */
     public RuleResponse getRuleWithZone(UUID id) {
         Rule rule = ruleRepository.findByIdWithZone(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
         return mapToResponse(rule);
     }
 
-    /**
-     * Récupère les règles par priorité minimale
-     */
     public List<RuleResponse> getRulesByPriorityGreaterThan(Integer priority) {
         return ruleRepository.findByPriorityGreaterThanEqual(priority).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Compte les règles actives par type
-     */
     public long countActiveRulesByType(RuleType type) {
         return ruleRepository.countActiveByType(type);
     }
 
-    /**
-     * Récupère les règles avec un seuil de temps supérieur
-     */
     public List<RuleResponse> getRulesByThresholdTimeGreaterThan(Integer thresholdTime) {
         return ruleRepository.findByThresholdTimeGreaterThan(thresholdTime).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère toutes les règles triées par priorité
-     */
     public List<RuleResponse> getAllRulesOrderedByPriority() {
         return ruleRepository.findAllOrderByPriorityDesc().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère les règles actives avec leurs zones
-     */
     public List<RuleResponse> getActiveRulesWithZones() {
         return ruleRepository.findActiveRulesWithZones().stream()
                 .map(this::mapToResponse)

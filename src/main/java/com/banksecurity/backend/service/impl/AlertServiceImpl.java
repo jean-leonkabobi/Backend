@@ -20,6 +20,7 @@ import com.banksecurity.backend.service.AuditLogService;
 import com.banksecurity.backend.service.EmailService;
 import com.banksecurity.backend.service.WebSocketService;
 import com.banksecurity.backend.util.AsyncUtils;
+import com.banksecurity.backend.util.Constants;
 import com.banksecurity.backend.util.DateUtils;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
@@ -89,28 +91,36 @@ public class AlertServiceImpl implements AlertService {
 
         alert = alertRepository.save(alert);
 
-        auditLogService.logAction(null, "ALERT_CREATED",
+        // ✅ Utilisation de Constants.AUDIT_ACTION_ALERT_CREATED
+        auditLogService.logAction(null, Constants.AUDIT_ACTION_ALERT_CREATED,
                 "Alerte créée: " + alert.getType() + " - " + alert.getSeverity());
 
         AlertResponse response = mapToResponse(alert);
 
         // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
-        AsyncUtils.runAsync(
+        CompletableFuture<Void> futureWebSocket = AsyncUtils.runAsync(
                 () -> webSocketService.broadcastAlert(response),
                 notificationExecutor,
                 "Diffusion alerte " + alert.getId()
         );
+        futureWebSocket.exceptionally(e -> {
+            log.error("Erreur lors de la diffusion WebSocket: {}", e.getMessage());
+            return null;
+        });
 
         // ✅ Création de la variable finale pour la lambda
         final Alert savedAlert = alert;
 
         if (savedAlert.getSeverity() == AlertSeverity.CRITICAL || savedAlert.getSeverity() == AlertSeverity.HIGH) {
-            // ✅ Utilisation de AsyncUtils.runAsync(Runnable) avec variable finale
-            AsyncUtils.runAsync(
+            CompletableFuture<Void> futureEmail = AsyncUtils.runAsync(
                     () -> emailService.sendAlertEmail(savedAlert, null),
                     notificationExecutor,
                     "Envoi email alerte critique " + savedAlert.getId()
             );
+            futureEmail.exceptionally(e -> {
+                log.error("Erreur lors de l'envoi de l'email: {}", e.getMessage());
+                return null;
+            });
         }
 
         log.info("Alerte créée: {} - {}", alert.getType(), alert.getSeverity());
@@ -251,7 +261,8 @@ public class AlertServiceImpl implements AlertService {
             alert.setResolutionNotes(notes);
             alert = alertRepository.save(alert);
 
-            auditLogService.logAction(null, "ALERT_RESOLVED",
+            // ✅ Utilisation de Constants.AUDIT_ACTION_ALERT_RESOLVED
+            auditLogService.logAction(null, Constants.AUDIT_ACTION_ALERT_RESOLVED,
                     "Alerte résolue: " + id + " -> " + resolutionStatus);
 
             return mapToResponse(alert);
@@ -348,24 +359,32 @@ public class AlertServiceImpl implements AlertService {
             throw new BadRequestException("La date de début ne peut pas être dans le futur");
         }
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        // ✅ Utilisation de Constants.MAX_ALERTS_PER_PAGE
+        int safeSize = Math.min(size, Constants.MAX_ALERTS_PER_PAGE);
+        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
 
         return alertRepository.findAlertsWithFilters(status, severity, cameraId, startDate, endDate, pageable)
                 .map(this::mapToResponse);
     }
 
     public Page<AlertResponse> getAlertsByStatusPaginated(AlertStatus status, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        // ✅ Utilisation de Constants.MAX_ALERTS_PER_PAGE
+        int safeSize = Math.min(size, Constants.MAX_ALERTS_PER_PAGE);
+        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
         return alertRepository.findByStatus(status, pageable).map(this::mapToResponse);
     }
 
     public Page<AlertResponse> getAlertsBySeverityPaginated(AlertSeverity severity, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        // ✅ Utilisation de Constants.MAX_ALERTS_PER_PAGE
+        int safeSize = Math.min(size, Constants.MAX_ALERTS_PER_PAGE);
+        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
         return alertRepository.findBySeverity(severity, pageable).map(this::mapToResponse);
     }
 
     public Page<AlertResponse> getAlertsByCameraPaginated(UUID cameraId, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        // ✅ Utilisation de Constants.MAX_ALERTS_PER_PAGE
+        int safeSize = Math.min(size, Constants.MAX_ALERTS_PER_PAGE);
+        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
         return alertRepository.findByCameraId(cameraId, pageable).map(this::mapToResponse);
     }
 

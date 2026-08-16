@@ -14,6 +14,7 @@ import com.banksecurity.backend.repository.ZoneRepository;
 import com.banksecurity.backend.security.UserPrincipal;
 import com.banksecurity.backend.service.AuditLogService;
 import com.banksecurity.backend.service.ZoneService;
+import com.banksecurity.backend.util.Constants;
 import com.banksecurity.backend.util.ValidationUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +24,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -59,13 +59,15 @@ public class ZoneServiceImpl implements ZoneService {
                     .points(request.getPoints())
                     .type(request.getType())
                     .description(request.getDescription())
-                    .sensitivity(request.getSensitivity() != null ? request.getSensitivity() : 50)
+                    // ✅ Utilisation de Constants.DEFAULT_ZONE_SENSITIVITY
+                    .sensitivity(request.getSensitivity() != null ? request.getSensitivity() : Constants.DEFAULT_ZONE_SENSITIVITY)
                     .isActive(true)
                     .build();
 
             zone = zoneRepository.save(zone);
 
-            auditLogService.logAction(null, "CREATE_ZONE",
+            // ✅ Utilisation de Constants.AUDIT_ACTION_CREATE
+            auditLogService.logAction(null, Constants.AUDIT_ACTION_CREATE + "_ZONE",
                     "Création zone: " + zone.getName() + " pour caméra: " + camera.getName());
             log.info("Zone créée: {}", zone.getName());
 
@@ -113,7 +115,8 @@ public class ZoneServiceImpl implements ZoneService {
 
             zone = zoneRepository.save(zone);
 
-            auditLogService.logAction(null, "UPDATE_ZONE", "Mise à jour zone: " + zone.getName());
+            // ✅ Utilisation de Constants.AUDIT_ACTION_UPDATE
+            auditLogService.logAction(null, Constants.AUDIT_ACTION_UPDATE + "_ZONE", "Mise à jour zone: " + zone.getName());
 
             return mapToResponse(zone);
 
@@ -141,7 +144,8 @@ public class ZoneServiceImpl implements ZoneService {
 
             zoneRepository.delete(zone);
 
-            auditLogService.logAction(null, "DELETE_ZONE", "Suppression zone: " + zone.getName());
+            // ✅ Utilisation de Constants.AUDIT_ACTION_DELETE
+            auditLogService.logAction(null, Constants.AUDIT_ACTION_DELETE + "_ZONE", "Suppression zone: " + zone.getName());
             log.info("Zone supprimée: {}", zone.getName());
         } catch (ResourceNotFoundException e) {
             throw e;
@@ -237,84 +241,54 @@ public class ZoneServiceImpl implements ZoneService {
 
     // ==================== NOUVELLES MÉTHODES UTILISANT LES REPOSITORY ====================
 
-    /**
-     * Récupère les zones par caméra et type
-     */
     public List<ZoneResponse> getZonesByCameraAndType(UUID cameraId, ZoneType type) {
         return zoneRepository.findByCameraIdAndType(cameraId, type).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère une zone avec ses règles
-     */
     public ZoneResponse getZoneWithRules(UUID id) {
         Zone zone = zoneRepository.findByIdWithRules(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
         return mapToResponse(zone);
     }
 
-    /**
-     * Récupère une zone avec sa caméra
-     */
     public ZoneResponse getZoneWithCamera(UUID id) {
         Zone zone = zoneRepository.findByIdWithCamera(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Zone", "id", id));
         return mapToResponse(zone);
     }
 
-    /**
-     * Compte les zones par type
-     */
     public long countZonesByType(ZoneType type) {
         return zoneRepository.countByType(type);
     }
 
-    /**
-     * Récupère les zones par sensibilité minimale
-     */
     public List<ZoneResponse> getZonesBySensitivityGreaterThan(Integer sensitivity) {
         return zoneRepository.findBySensitivityGreaterThanEqual(sensitivity).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère les zones inactives
-     */
     public List<ZoneResponse> getInactiveZones() {
         return zoneRepository.findByIsActiveFalse().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère toutes les zones triées par date de création
-     */
     public List<ZoneResponse> getAllZonesOrderedByCreation() {
         return zoneRepository.findAllOrderByCreatedAtDesc().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Vérifie si une zone existe pour une caméra avec un nom donné
-     */
     public boolean zoneExists(UUID cameraId, String name) {
         return zoneRepository.existsByCameraIdAndName(cameraId, name);
     }
 
-    /**
-     * Compte les zones actives
-     */
     public long countActiveZones() {
         return zoneRepository.findByIsActiveTrue().size();
     }
 
-    /**
-     * Compte les zones inactives
-     */
     public long countInactiveZones() {
         return zoneRepository.findByIsActiveFalse().size();
     }
@@ -340,6 +314,14 @@ public class ZoneServiceImpl implements ZoneService {
     private double[][] parsePoints(String pointsJson) {
         try {
             String[] pointStrings = pointsJson.replaceAll("[\\[\\]]", "").split(",");
+            // ✅ Utilisation de Constants.MAX_ZONE_POINTS et MIN_ZONE_POINTS
+            if (pointStrings.length / 2 > Constants.MAX_ZONE_POINTS) {
+                throw new BadRequestException("Trop de points dans le polygone (max: " + Constants.MAX_ZONE_POINTS + ")");
+            }
+            if (pointStrings.length / 2 < Constants.MIN_ZONE_POINTS) {
+                throw new BadRequestException("Pas assez de points dans le polygone (min: " + Constants.MIN_ZONE_POINTS + ")");
+            }
+
             double[][] points = new double[pointStrings.length / 2][2];
 
             for (int i = 0; i < pointStrings.length; i += 2) {
