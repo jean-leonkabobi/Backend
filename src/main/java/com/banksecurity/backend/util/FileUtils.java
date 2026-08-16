@@ -29,22 +29,20 @@ public final class FileUtils {
             throw new IllegalArgumentException("Le fichier est vide");
         }
 
-        // Créer le dossier si nécessaire
         Path uploadPath = Paths.get(directory);
         if (!Files.exists(uploadPath)) {
             Files.createDirectories(uploadPath);
         }
 
-        // Générer un nom de fichier unique
         String originalFilename = file.getOriginalFilename();
         String extension = getFileExtension(originalFilename);
-        String newFilename = UUID.randomUUID().toString() + extension;
+        String newFilename = UUID.randomUUID() + extension;
 
-        // Sauvegarder le fichier
         Path targetPath = uploadPath.resolve(newFilename);
         Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
 
-        log.info("Fichier sauvegardé: {}", targetPath);
+        // ✅ Message de log différencié
+        log.info("[FILE-UPLOAD] Fichier uploadé: {} (source: {})", targetPath, originalFilename);
         return targetPath.toString();
     }
 
@@ -56,36 +54,43 @@ public final class FileUtils {
             throw new IllegalArgumentException("Les données sont vides");
         }
 
-        // Créer le dossier si nécessaire
         Path uploadPath = Paths.get(directory);
         if (!Files.exists(uploadPath)) {
             Files.createDirectories(uploadPath);
         }
 
-        // Générer un nom de fichier unique
-        String newFilename = UUID.randomUUID().toString() + extension;
+        String newFilename = UUID.randomUUID() + extension;
 
-        // Sauvegarder le fichier
         Path targetPath = uploadPath.resolve(newFilename);
         Files.write(targetPath, data);
 
-        log.info("Fichier sauvegardé: {}", targetPath);
+        // ✅ Message de log différencié
+        log.info("[FILE-BYTES] Fichier écrit depuis bytes: {} (taille: {} bytes)", targetPath, data.length);
         return targetPath.toString();
     }
 
     /**
      * Supprime un fichier
+     * Le retour boolean indique si la suppression a réussi
      */
     public static boolean deleteFile(String filePath) {
         if (filePath == null || filePath.isEmpty()) {
+            log.warn("[FILE-DELETE] Chemin de fichier vide");
             return false;
         }
 
         try {
             Path path = Paths.get(filePath);
-            return Files.deleteIfExists(path);
+            boolean deleted = Files.deleteIfExists(path);
+            if (deleted) {
+                // ✅ Message de log différencié
+                log.info("[FILE-DELETE] Fichier supprimé avec succès: {}", path);
+            } else {
+                log.debug("[FILE-DELETE] Fichier non trouvé (rien à supprimer): {}", path);
+            }
+            return deleted;
         } catch (IOException e) {
-            log.error("Erreur lors de la suppression du fichier: {}", filePath, e);
+            log.error("[FILE-DELETE] Erreur lors de la suppression du fichier: {}", filePath, e);
             return false;
         }
     }
@@ -147,7 +152,7 @@ public final class FileUtils {
         try {
             return Files.size(Paths.get(filePath));
         } catch (IOException e) {
-            log.error("Erreur lors de la lecture de la taille du fichier: {}", filePath, e);
+            log.error("[FILE-SIZE] Erreur lors de la lecture de la taille du fichier: {}", filePath, e);
             return 0;
         }
     }

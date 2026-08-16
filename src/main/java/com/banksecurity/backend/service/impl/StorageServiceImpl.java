@@ -7,6 +7,8 @@ import com.banksecurity.backend.service.StorageService;
 import com.banksecurity.backend.util.AsyncUtils;
 import com.banksecurity.backend.util.Constants;
 import com.banksecurity.backend.util.DateUtils;
+import com.banksecurity.backend.util.FileUtils;
+import com.banksecurity.backend.util.ImageUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.UrlResource;
@@ -42,7 +44,23 @@ public class StorageServiceImpl implements StorageService {
                 throw new BadRequestException("Image trop volumineuse. Taille maximale: " +
                         (Constants.MAX_IMAGE_SIZE / (1024 * 1024)) + " MB");
             }
-            return storageConfig.saveImage(file);
+
+            String originalFilename = file.getOriginalFilename();
+            if (originalFilename != null && !FileUtils.isImageFile(originalFilename)) {
+                throw new BadRequestException("Type de fichier non supporté pour une image: " + originalFilename);
+            }
+
+            // ✅ Utilisation de ImageUtils.isValidImage
+            byte[] imageData = file.getBytes();
+            if (!ImageUtils.isValidImage(imageData)) {
+                throw new BadRequestException("Le fichier n'est pas une image valide");
+            }
+
+            // ✅ Utilisation de ImageUtils.getImageDimensions
+            java.awt.Dimension dimensions = ImageUtils.getImageDimensions(imageData);
+            log.debug("Image originale: {}x{} pixels", dimensions.width, dimensions.height);
+
+            return FileUtils.saveFile(file, storageConfig.getImagesPath());
         } catch (IOException e) {
             log.error("Erreur lors de la sauvegarde de l'image: {}", e.getMessage(), e);
             throw new BadRequestException("Erreur lors de la sauvegarde de l'image", e);
@@ -56,7 +74,13 @@ public class StorageServiceImpl implements StorageService {
                 throw new BadRequestException("Vidéo trop volumineuse. Taille maximale: " +
                         (Constants.MAX_VIDEO_SIZE / (1024 * 1024)) + " MB");
             }
-            return storageConfig.saveVideo(file);
+
+            String originalFilename = file.getOriginalFilename();
+            if (originalFilename != null && !FileUtils.isVideoFile(originalFilename)) {
+                throw new BadRequestException("Type de fichier non supporté pour une vidéo: " + originalFilename);
+            }
+
+            return FileUtils.saveFile(file, storageConfig.getVideosPath());
         } catch (IOException e) {
             log.error("Erreur lors de la sauvegarde de la vidéo: {}", e.getMessage(), e);
             throw new BadRequestException("Erreur lors de la sauvegarde de la vidéo", e);
@@ -74,26 +98,27 @@ public class StorageServiceImpl implements StorageService {
                     (Constants.MAX_IMAGE_SIZE / (1024 * 1024)) + " MB");
         }
 
-        String newFilename = generateUniqueFilename(filename);
-        Path targetPath = Paths.get(storageConfig.getImagesPath()).resolve(newFilename);
+        // ✅ Utilisation de ImageUtils.isValidImage
+        if (!ImageUtils.isValidImage(imageData)) {
+            throw new BadRequestException("Les données ne sont pas une image valide");
+        }
 
-        CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> {
-                    try {
-                        Files.write(targetPath, imageData);
-                        return null;
-                    } catch (IOException e) {
-                        throw new RuntimeException("Erreur d'écriture du fichier", e);
-                    }
-                },
-                storageExecutor,
-                "Sauvegarde image " + newFilename
-        );
+        String extension = FileUtils.getFileExtension(filename);
+        if (extension.isEmpty()) {
+            extension = ".jpg";
+        }
 
-        future.join();
+        // ✅ Utilisation de ImageUtils.resizeImage (max 1920x1080)
+        byte[] resizedImage = ImageUtils.resizeImage(imageData, 1920, 1080);
+        log.debug("Image redimensionnée de {} à {} bytes", imageData.length, resizedImage.length);
 
-        log.info("Image sauvegardée (bytes) à {}: {}", DateUtils.formatTime(LocalDateTime.now()), targetPath);
-        return targetPath.toString();
+        // ✅ Utilisation de ImageUtils.addWatermark
+        byte[] watermarkedImage = ImageUtils.addWatermark(resizedImage, Constants.APP_NAME);
+        log.debug("Filigrane ajouté");
+
+        String savedPath = FileUtils.saveBytes(watermarkedImage, storageConfig.getImagesPath(), extension);
+        log.info("Image sauvegardée (bytes) à {}: {}", DateUtils.formatTime(LocalDateTime.now()), savedPath);
+        return savedPath;
     }
 
     @Override
@@ -140,24 +165,36 @@ public class StorageServiceImpl implements StorageService {
 
     @Override
     public void deleteImage(String filename) {
-        storageConfig.deleteImage(filename);
+        String filePath = Paths.get(storageConfig.getImagesPath()).resolve(filename).normalize().toString();
+        boolean deleted = FileUtils.deleteFile(filePath);
+        if (deleted) {
+            log.info("Image supprimée avec succès: {}", filename);
+        } else {
+            log.warn("Image non trouvée pour suppression: {}", filename);
+        }
     }
 
     @Override
     public void deleteVideo(String filename) {
-        storageConfig.deleteVideo(filename);
+        String filePath = Paths.get(storageConfig.getVideosPath()).resolve(filename).normalize().toString();
+        boolean deleted = FileUtils.deleteFile(filePath);
+        if (deleted) {
+            log.info("Vidéo supprimée avec succès: {}", filename);
+        } else {
+            log.warn("Vidéo non trouvée pour suppression: {}", filename);
+        }
     }
 
     @Override
     public boolean imageExists(String filename) {
-        Path filePath = Paths.get(storageConfig.getImagesPath()).resolve(filename).normalize();
-        return Files.exists(filePath);
+        String filePath = Paths.get(storageConfig.getImagesPath()).resolve(filename).normalize().toString();
+        return FileUtils.fileExists(filePath);
     }
 
     @Override
     public boolean videoExists(String filename) {
-        Path filePath = Paths.get(storageConfig.getVideosPath()).resolve(filename).normalize();
-        return Files.exists(filePath);
+        String filePath = Paths.get(storageConfig.getVideosPath()).resolve(filename).normalize().toString();
+        return FileUtils.fileExists(filePath);
     }
 
     @Override
@@ -180,13 +217,16 @@ public class StorageServiceImpl implements StorageService {
                 files.filter(Files::isRegularFile)
                         .forEach(file -> {
                             try {
-                                // ✅ Utilisation de DateUtils.toLocalDateTime
                                 Date lastModifiedDate = new Date(Files.getLastModifiedTime(file).toMillis());
                                 LocalDateTime lastModified = DateUtils.toLocalDateTime(lastModifiedDate);
 
                                 if (DateUtils.isPast(lastModified) && lastModified.isBefore(cutoff)) {
-                                    Files.deleteIfExists(file);
-                                    log.info("Fichier expiré supprimé: {}", file);
+                                    long fileSize = FileUtils.getFileSize(file.toString());
+                                    log.debug("Taille du fichier à supprimer: {}", FileUtils.humanReadableSize(fileSize));
+                                    boolean deleted = FileUtils.deleteFile(file.toString());
+                                    if (deleted) {
+                                        log.info("Fichier expiré supprimé: {}", file);
+                                    }
                                 }
                             } catch (IOException e) {
                                 log.error("Erreur lors de la vérification du fichier: {}", file, e);
@@ -204,7 +244,6 @@ public class StorageServiceImpl implements StorageService {
             extension = originalFilename.substring(originalFilename.lastIndexOf("."));
         }
 
-        // ✅ Utilisation de DateUtils.parse
         LocalDateTime now = DateUtils.parse(DateUtils.format(LocalDateTime.now()));
         String dateStr = DateUtils.formatShort(now).replace("-", "");
         String timeStr = DateUtils.formatTime(now).replace(":", "");
