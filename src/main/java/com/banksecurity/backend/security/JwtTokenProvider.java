@@ -1,7 +1,12 @@
 package com.banksecurity.backend.security;
 
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.MalformedJwtException;
+import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.Keys;
+import io.jsonwebtoken.security.SecurityException;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,9 +43,12 @@ public class JwtTokenProvider {
 
     /**
      * Génère un token JWT à partir de l'authentification
+     * Utilisé par AuthServiceImpl lors du login
      */
     public String generateToken(Authentication authentication) {
-        UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal userPrincipal)) {
+            throw new IllegalArgumentException("Authentication invalide");
+        }
         return generateToken(userPrincipal);
     }
 
@@ -48,6 +56,10 @@ public class JwtTokenProvider {
      * Génère un token JWT pour un utilisateur
      */
     public String generateToken(UserPrincipal userPrincipal) {
+        if (userPrincipal == null) {
+            throw new IllegalArgumentException("UserPrincipal ne peut pas être null");
+        }
+
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userPrincipal.getId().toString());
         claims.put("email", userPrincipal.getEmail());
@@ -62,6 +74,10 @@ public class JwtTokenProvider {
      * Génère un token de rafraîchissement
      */
     public String generateRefreshToken(UserPrincipal userPrincipal) {
+        if (userPrincipal == null) {
+            throw new IllegalArgumentException("UserPrincipal ne peut pas être null");
+        }
+
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userPrincipal.getId().toString());
         claims.put("type", "refresh");
@@ -98,14 +114,19 @@ public class JwtTokenProvider {
      */
     public UUID getUserIdFromToken(String token) {
         String userId = extractClaim(token, claims -> claims.get("userId", String.class));
+        if (userId == null) {
+            throw new IllegalArgumentException("Claim 'userId' manquante dans le token");
+        }
         return UUID.fromString(userId);
     }
 
     /**
      * Extrait le rôle du token
+     * Utilisé pour la vérification des autorisations
      */
     public String getRoleFromToken(String token) {
-        return extractClaim(token, claims -> claims.get("role", String.class));
+        String role = extractClaim(token, claims -> claims.get("role", String.class));
+        return role != null ? role : "UNKNOWN";
     }
 
     /**
@@ -137,20 +158,23 @@ public class JwtTokenProvider {
                     .build()
                     .parseSignedClaims(token);
             return true;
-        } catch (SecurityException | MalformedJwtException e) {
-            log.error("Token JWT invalide: {}", e.getMessage());
+        } catch (SecurityException e) {
+            log.error("Signature JWT invalide: {}", e.getMessage());
+        } catch (MalformedJwtException e) {
+            log.error("Token JWT malformé: {}", e.getMessage());
         } catch (ExpiredJwtException e) {
             log.error("Token JWT expiré: {}", e.getMessage());
         } catch (UnsupportedJwtException e) {
             log.error("Token JWT non supporté: {}", e.getMessage());
         } catch (IllegalArgumentException e) {
-            log.error("Token JWT vide: {}", e.getMessage());
+            log.error("Token JWT vide ou invalide: {}", e.getMessage());
         }
         return false;
     }
 
     /**
      * Vérifie si le token est expiré
+     * Utilisé pour vérifier la validité avant utilisation
      */
     public boolean isTokenExpired(String token) {
         try {
@@ -177,6 +201,7 @@ public class JwtTokenProvider {
 
     /**
      * Retourne la durée de validité du refresh token en secondes
+     * Utilisé pour informer le client de la durée du refresh token
      */
     public long getRefreshTokenValidityInSeconds() {
         return refreshExpiration / 1000;

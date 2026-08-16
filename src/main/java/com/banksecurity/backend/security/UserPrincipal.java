@@ -18,6 +18,7 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@SuppressWarnings("NullMarked")
 public class UserPrincipal implements UserDetails {
 
     private UUID id;
@@ -63,18 +64,8 @@ public class UserPrincipal implements UserDetails {
     }
 
     @Override
-    public boolean isAccountNonExpired() {
-        return true;
-    }
-
-    @Override
     public boolean isAccountNonLocked() {
         return !accountLocked;
-    }
-
-    @Override
-    public boolean isCredentialsNonExpired() {
-        return true;
     }
 
     @Override
@@ -82,6 +73,11 @@ public class UserPrincipal implements UserDetails {
         return isActive;
     }
 
+    /**
+     * Retourne le nom complet de l'utilisateur
+     * Utilisé pour l'affichage dans les logs et les emails
+     */
+    @SuppressWarnings("unused")
     public String getFullName() {
         return firstName + " " + lastName;
     }

@@ -2,8 +2,9 @@ package com.banksecurity.backend.security;
 
 import com.banksecurity.backend.model.User;
 import com.banksecurity.backend.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.jspecify.annotations.Nullable;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -11,17 +12,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class CustomUserDetailsService implements UserDetailsService {
 
-    @Autowired
-    private UserRepository userRepository;
+    private final UserRepository userRepository;
 
     @Override
     @Transactional
-    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+    @Nullable
+    public UserDetails loadUserByUsername(@Nullable String email) throws UsernameNotFoundException {
+        if (email == null || email.isEmpty()) {
+            throw new UsernameNotFoundException("Email non fourni");
+        }
+
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("Utilisateur non trouvé avec l'email: " + email));
 
@@ -47,10 +54,12 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     /**
      * Charge un utilisateur par son ID
+     * Utilisé par JwtAuthenticationFilter pour valider le token JWT
      */
     @Transactional
-    public UserDetails loadUserById(Long id) {
-        User user = userRepository.findById(java.util.UUID.fromString(id.toString()))
+    @SuppressWarnings("unused")
+    public UserDetails loadUserById(UUID id) {
+        User user = userRepository.findById(id)
                 .orElseThrow(() -> new UsernameNotFoundException("Utilisateur non trouvé avec l'ID: " + id));
 
         return UserPrincipal.create(user);

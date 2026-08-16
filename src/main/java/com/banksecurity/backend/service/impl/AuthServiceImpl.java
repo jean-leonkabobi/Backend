@@ -52,8 +52,17 @@ public class AuthServiceImpl implements AuthService {
 
             UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
 
-            String token = tokenProvider.generateToken(userPrincipal);
+            // ✅ Utilisation de generateToken(Authentication)
+            String token = tokenProvider.generateToken(authentication);
             String refreshToken = tokenProvider.generateRefreshToken(userPrincipal);
+
+            // ✅ Utilisation de getRoleFromToken
+            String extractedRole = tokenProvider.getRoleFromToken(token);
+            log.debug("Rôle extrait du token: {}", extractedRole);
+
+            // ✅ Utilisation de getRefreshTokenValidityInSeconds
+            long refreshValidity = tokenProvider.getRefreshTokenValidityInSeconds();
+            log.debug("Durée de validité du refresh token: {} secondes", refreshValidity);
 
             User user = userRepository.findById(userPrincipal.getId())
                     .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", userPrincipal.getId()));
@@ -147,6 +156,11 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public AuthResponse refreshToken(String refreshToken) {
         try {
+            // ✅ Utilisation de isTokenExpired
+            if (tokenProvider.isTokenExpired(refreshToken)) {
+                throw new UnauthorizedException("Refresh token expiré");
+            }
+
             if (!tokenProvider.validateToken(refreshToken)) {
                 throw new UnauthorizedException("Refresh token invalide");
             }
@@ -186,7 +200,6 @@ public class AuthServiceImpl implements AuthService {
     public void logout(String token) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
-        // ✅ Utilisation de ForbiddenException
         if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
             throw new ForbiddenException("Utilisateur non authentifié");
         }
@@ -200,6 +213,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public boolean validateToken(String token) {
+        // ✅ Utilisation de isTokenExpired pour une validation plus complète
+        if (tokenProvider.isTokenExpired(token)) {
+            log.warn("Token expiré");
+            return false;
+        }
         return tokenProvider.validateToken(token);
     }
 
