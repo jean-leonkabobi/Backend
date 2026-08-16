@@ -32,12 +32,10 @@ public class EmailServiceImpl implements EmailService {
             return;
         }
 
-        // ✅ Utilisation de Constants.EMAIL_ALERT_SUBJECT
         String subject = Constants.EMAIL_ALERT_SUBJECT + alert.getSeverity();
         String content = buildAlertEmailContent(alert);
 
         EmailMessage message = EmailMessage.builder()
-                // ✅ Utilisation de Constants.EMAIL_FROM
                 .from(Constants.EMAIL_FROM)
                 .to(new String[]{"security-team@banksecurity.com"})
                 .subject(subject)
@@ -45,15 +43,8 @@ public class EmailServiceImpl implements EmailService {
                 .html(true)
                 .build();
 
-        CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> emailClient.sendHtmlEmail(message),
-                notificationExecutor,
-                "Envoi email alerte " + alert.getId()
-        );
-        future.exceptionally(e -> {
-            log.error("Erreur lors de l'envoi de l'email d'alerte: {}", e.getMessage());
-            return null;
-        });
+        // ✅ Utilisation de Constants.MAX_EMAIL_RETRIES pour les tentatives de ré-envoi
+        sendWithRetry(message, Constants.MAX_EMAIL_RETRIES, "alerte " + alert.getId());
 
         log.info("Email d'alerte envoyé (async): {} - {}", alert.getType(), alert.getSeverity());
     }
@@ -73,15 +64,8 @@ public class EmailServiceImpl implements EmailService {
                 .html(false)
                 .build();
 
-        CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> emailClient.sendSimpleEmail(message),
-                notificationExecutor,
-                "Envoi notification à " + to
-        );
-        future.exceptionally(e -> {
-            log.error("Erreur lors de l'envoi de la notification: {}", e.getMessage());
-            return null;
-        });
+        // ✅ Utilisation de Constants.MAX_EMAIL_RETRIES
+        sendWithRetry(message, Constants.MAX_EMAIL_RETRIES, "notification à " + to);
 
         log.info("Email de notification envoyé (async) à: {}", to);
     }
@@ -164,6 +148,47 @@ public class EmailServiceImpl implements EmailService {
     @Override
     public boolean isEmailConfigured() {
         return emailClient.isConfigured();
+    }
+
+    /**
+     * Envoie un email avec un mécanisme de ré-essai
+     * ✅ Utilisation de Constants.MAX_EMAIL_RETRIES
+     */
+    private void sendWithRetry(EmailMessage message, int maxRetries, String description) {
+        CompletableFuture<Void> future = AsyncUtils.runAsync(
+                () -> {
+                    int attempt = 0;
+                    boolean sent = false;
+
+                    while (!sent && attempt < maxRetries) {
+                        try {
+                            if (message.isHtml()) {
+                                emailClient.sendHtmlEmail(message);
+                            } else {
+                                emailClient.sendSimpleEmail(message);
+                            }
+                            sent = true;
+                            log.debug("Email envoyé avec succès à la tentative {}/{}: {}",
+                                    attempt + 1, maxRetries, description);
+                        } catch (Exception e) {
+                            attempt++;
+                            log.warn("Échec de l'envoi de l'email (tentative {}/{}): {} - {}",
+                                    attempt, maxRetries, description, e.getMessage());
+                            if (attempt >= maxRetries) {
+                                throw new RuntimeException("Impossible d'envoyer l'email après " + maxRetries + " tentatives", e);
+                            }
+                        }
+                    }
+                    return null;
+                },
+                notificationExecutor,
+                "Envoi email avec retry: " + description
+        );
+
+        future.exceptionally(e -> {
+            log.error("Erreur finale lors de l'envoi de l'email: {}", e.getMessage());
+            return null;
+        });
     }
 
     private String buildAlertEmailContent(Alert alert) {

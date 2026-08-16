@@ -14,6 +14,7 @@ import com.banksecurity.backend.security.JwtTokenProvider;
 import com.banksecurity.backend.security.UserPrincipal;
 import com.banksecurity.backend.service.AuthService;
 import com.banksecurity.backend.service.AuditLogService;
+import com.banksecurity.backend.util.Constants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -52,15 +53,12 @@ public class AuthServiceImpl implements AuthService {
 
             UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
 
-            // ✅ Utilisation de generateToken(Authentication)
             String token = tokenProvider.generateToken(authentication);
             String refreshToken = tokenProvider.generateRefreshToken(userPrincipal);
 
-            // ✅ Utilisation de getRoleFromToken
             String extractedRole = tokenProvider.getRoleFromToken(token);
             log.debug("Rôle extrait du token: {}", extractedRole);
 
-            // ✅ Utilisation de getRefreshTokenValidityInSeconds
             long refreshValidity = tokenProvider.getRefreshTokenValidityInSeconds();
             log.debug("Durée de validité du refresh token: {} secondes", refreshValidity);
 
@@ -70,14 +68,15 @@ public class AuthServiceImpl implements AuthService {
             user.setFailedAttempts(0);
             userRepository.save(user);
 
-            auditLogService.logAction(user.getId(), "LOGIN", "Connexion réussie");
+            // ✅ Utilisation de Constants.AUDIT_ACTION_LOGIN
+            auditLogService.logAction(user.getId(), Constants.AUDIT_ACTION_LOGIN, "Connexion réussie");
 
             log.info("Utilisateur connecté: {}", userPrincipal.getEmail());
 
             return AuthResponse.builder()
                     .token(token)
                     .refreshToken(refreshToken)
-                    .tokenType("Bearer")
+                    .tokenType(Constants.JWT_TYPE)
                     .expiresIn(tokenProvider.getTokenValidityInSeconds())
                     .userId(userPrincipal.getId())
                     .email(userPrincipal.getEmail())
@@ -129,14 +128,14 @@ public class AuthServiceImpl implements AuthService {
             String token = tokenProvider.generateToken(userPrincipal);
             String refreshToken = tokenProvider.generateRefreshToken(userPrincipal);
 
-            auditLogService.logAction(user.getId(), "REGISTER", "Nouvel utilisateur créé");
+            auditLogService.logAction(user.getId(), Constants.AUDIT_ACTION_CREATE + "_USER", "Nouvel utilisateur créé");
 
             log.info("Nouvel utilisateur enregistré: {}", user.getEmail());
 
             return AuthResponse.builder()
                     .token(token)
                     .refreshToken(refreshToken)
-                    .tokenType("Bearer")
+                    .tokenType(Constants.JWT_TYPE)
                     .expiresIn(tokenProvider.getTokenValidityInSeconds())
                     .userId(user.getId())
                     .email(user.getEmail())
@@ -156,7 +155,6 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public AuthResponse refreshToken(String refreshToken) {
         try {
-            // ✅ Utilisation de isTokenExpired
             if (tokenProvider.isTokenExpired(refreshToken)) {
                 throw new UnauthorizedException("Refresh token expiré");
             }
@@ -177,7 +175,7 @@ public class AuthServiceImpl implements AuthService {
             return AuthResponse.builder()
                     .token(newToken)
                     .refreshToken(newRefreshToken)
-                    .tokenType("Bearer")
+                    .tokenType(Constants.JWT_TYPE)
                     .expiresIn(tokenProvider.getTokenValidityInSeconds())
                     .userId(user.getId())
                     .email(user.getEmail())
@@ -205,7 +203,8 @@ public class AuthServiceImpl implements AuthService {
         }
 
         UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
-        auditLogService.logAction(userPrincipal.getId(), "LOGOUT", "Déconnexion");
+        // ✅ Utilisation de Constants.AUDIT_ACTION_LOGOUT
+        auditLogService.logAction(userPrincipal.getId(), Constants.AUDIT_ACTION_LOGOUT, "Déconnexion");
         log.info("Utilisateur déconnecté: {}", userPrincipal.getEmail());
 
         SecurityContextHolder.clearContext();
@@ -213,7 +212,6 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public boolean validateToken(String token) {
-        // ✅ Utilisation de isTokenExpired pour une validation plus complète
         if (tokenProvider.isTokenExpired(token)) {
             log.warn("Token expiré");
             return false;

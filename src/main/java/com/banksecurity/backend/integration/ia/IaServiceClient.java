@@ -60,9 +60,23 @@ public class IaServiceClient {
             );
 
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                IaDetectionResponse detectionResponse = response.getBody();
+
+                // ✅ Utilisation de Constants.HIGH_CONFIDENCE_THRESHOLD
+                if (detectionResponse.getDetections() != null) {
+                    long highConfidenceCount = detectionResponse.getDetections().stream()
+                            .filter(d -> d.getConfidence() != null && d.getConfidence() >= Constants.HIGH_CONFIDENCE_THRESHOLD)
+                            .count();
+
+                    if (highConfidenceCount > 0) {
+                        log.info("Détection haute confiance: {} objets avec confiance >= {}",
+                                highConfidenceCount, Constants.HIGH_CONFIDENCE_THRESHOLD);
+                    }
+                }
+
                 log.debug("Détection IA réussie: {} objets détectés",
-                        response.getBody().getDetections() != null ? response.getBody().getDetections().size() : 0);
-                return response.getBody();
+                        detectionResponse.getDetections() != null ? detectionResponse.getDetections().size() : 0);
+                return detectionResponse;
             } else {
                 log.error("Réponse inattendue du service IA: {}", response.getStatusCode());
                 throw new BadRequestException("Erreur lors de la détection IA");

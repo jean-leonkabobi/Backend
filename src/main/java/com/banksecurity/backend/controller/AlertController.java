@@ -7,6 +7,7 @@ import com.banksecurity.backend.dto.response.ApiResponse;
 import com.banksecurity.backend.model.enums.AlertSeverity;
 import com.banksecurity.backend.model.enums.AlertStatus;
 import com.banksecurity.backend.service.AlertService;
+import com.banksecurity.backend.util.Constants;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -34,9 +35,14 @@ public class AlertController {
     @GetMapping
     @Operation(summary = "Récupérer toutes les alertes")
     @PreAuthorize("hasAnyRole('ADMIN', 'SECURITY', 'MANAGER')")
-    public ResponseEntity<ApiResponse<List<AlertResponse>>> getAllAlerts() {
+    public ResponseEntity<ApiResponse<List<AlertResponse>>> getAllAlerts(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = Constants.DEFAULT_PAGE_SIZE + "") int size) {
+
         List<AlertResponse> alerts = alertService.getAllAlerts();
-        return ResponseEntity.ok(ApiResponse.success("Alertes récupérées", alerts));
+        // ✅ Utilisation de la méthode utilitaire
+        List<AlertResponse> paginatedAlerts = paginate(alerts, page, size);
+        return ResponseEntity.ok(ApiResponse.success("Alertes récupérées", paginatedAlerts));
     }
 
     @GetMapping("/{id}")
@@ -50,17 +56,29 @@ public class AlertController {
     @GetMapping("/status/{status}")
     @Operation(summary = "Récupérer les alertes par statut")
     @PreAuthorize("hasAnyRole('ADMIN', 'SECURITY', 'MANAGER')")
-    public ResponseEntity<ApiResponse<List<AlertResponse>>> getAlertsByStatus(@PathVariable AlertStatus status) {
+    public ResponseEntity<ApiResponse<List<AlertResponse>>> getAlertsByStatus(
+            @PathVariable AlertStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = Constants.DEFAULT_PAGE_SIZE + "") int size) {
+
         List<AlertResponse> alerts = alertService.getAlertsByStatus(status);
-        return ResponseEntity.ok(ApiResponse.success("Alertes récupérées", alerts));
+        // ✅ Utilisation de la méthode utilitaire
+        List<AlertResponse> paginatedAlerts = paginate(alerts, page, size);
+        return ResponseEntity.ok(ApiResponse.success("Alertes récupérées", paginatedAlerts));
     }
 
     @GetMapping("/severity/{severity}")
     @Operation(summary = "Récupérer les alertes par sévérité")
     @PreAuthorize("hasAnyRole('ADMIN', 'SECURITY', 'MANAGER')")
-    public ResponseEntity<ApiResponse<List<AlertResponse>>> getAlertsBySeverity(@PathVariable AlertSeverity severity) {
+    public ResponseEntity<ApiResponse<List<AlertResponse>>> getAlertsBySeverity(
+            @PathVariable AlertSeverity severity,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = Constants.DEFAULT_PAGE_SIZE + "") int size) {
+
         List<AlertResponse> alerts = alertService.getAlertsBySeverity(severity);
-        return ResponseEntity.ok(ApiResponse.success("Alertes récupérées", alerts));
+        // ✅ Utilisation de la méthode utilitaire
+        List<AlertResponse> paginatedAlerts = paginate(alerts, page, size);
+        return ResponseEntity.ok(ApiResponse.success("Alertes récupérées", paginatedAlerts));
     }
 
     @GetMapping("/camera/{cameraId}")
@@ -125,5 +143,20 @@ public class AlertController {
             @RequestParam(required = false) String notes) {
         AlertResponse alert = alertService.resolveAlert(id, status, notes);
         return ResponseEntity.ok(ApiResponse.success("Alerte résolue", alert));
+    }
+
+    /**
+     * Méthode utilitaire pour paginer une liste
+     * ✅ Évite la duplication de code
+     */
+    private List<AlertResponse> paginate(List<AlertResponse> alerts, int page, int size) {
+        int safeSize = Math.min(size, Constants.MAX_PAGE_SIZE);
+        int start = Math.min(page * safeSize, alerts.size());
+        int end = Math.min(start + safeSize, alerts.size());
+
+        if (start >= alerts.size()) {
+            return List.of();
+        }
+        return alerts.subList(start, end);
     }
 }

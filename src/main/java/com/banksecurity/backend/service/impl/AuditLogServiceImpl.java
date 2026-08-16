@@ -114,6 +114,8 @@ public class AuditLogServiceImpl implements AuditLogService {
 
     @Override
     public List<AuditLog> getLogsByUser(UUID userId) {
+        // ✅ Utilisation de Constants.AUDIT_ACTION_VIEW
+        logAction(userId, Constants.AUDIT_ACTION_VIEW, "Consultation des logs utilisateur");
         return auditLogRepository.findByUserId(userId);
     }
 

@@ -34,6 +34,8 @@ public class CameraServiceImpl implements CameraService {
     private final CameraRepository cameraRepository;
     private final AuditLogService auditLogService;
 
+    // ==================== MÉTHODES CRUD EXISTANTES ====================
+
     @Override
     @Transactional
     public CameraResponse createCamera(CameraRequest request) {
@@ -48,6 +50,11 @@ public class CameraServiceImpl implements CameraService {
 
             if (request.getIpAddress() != null && cameraRepository.findByIpAddress(request.getIpAddress()).isPresent()) {
                 throw new ConflictException("Une caméra avec cette adresse IP existe déjà: " + request.getIpAddress());
+            }
+
+            // ✅ Utilisation de Constants.MAX_CAMERAS_PER_SERVER
+            if (cameraRepository.count() >= Constants.MAX_CAMERAS_PER_SERVER) {
+                throw new BadRequestException("Nombre maximum de caméras atteint: " + Constants.MAX_CAMERAS_PER_SERVER);
             }
 
             Camera camera = Camera.builder()
@@ -75,6 +82,8 @@ public class CameraServiceImpl implements CameraService {
             return mapToResponse(camera);
 
         } catch (ConflictException e) {
+            throw e;
+        } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
             log.error("Erreur lors de la création de la caméra: {}", e.getMessage(), e);
@@ -284,7 +293,66 @@ public class CameraServiceImpl implements CameraService {
         return cameraRepository.countByStatus(status);
     }
 
-    // ... reste du code inchangé ...
+    // ==================== NOUVELLES MÉTHODES UTILISANT LES REPOSITORY ====================
+
+    public List<CameraResponse> getActiveAnalyzingCameras(CameraStatus status) {
+        return cameraRepository.findByStatusAndIsAnalyzingTrue(status).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<CameraResponse> searchCamerasByLocation(String location) {
+        return cameraRepository.findByLocationContainingIgnoreCase(location).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<CameraResponse> getCamerasInError() {
+        return cameraRepository.findCamerasInError().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    public CameraResponse getCameraWithZones(UUID id) {
+        Camera camera = cameraRepository.findByIdWithZones(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Caméra", "id", id));
+        return mapToResponse(camera);
+    }
+
+    public List<CameraResponse> getRecordingCameras() {
+        return cameraRepository.findByIsRecordingTrue().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<CameraResponse> getAnalyzingCameras() {
+        return cameraRepository.findByIsAnalyzingTrue().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<CameraResponse> searchCamerasByModel(String model) {
+        return cameraRepository.findByModelContainingIgnoreCase(model).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<CameraResponse> getAllCamerasOrderedByCreation() {
+        return cameraRepository.findAllOrderByCreatedAtDesc().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    public long countActiveCameras() {
+        return cameraRepository.countByStatus(CameraStatus.ACTIVE);
+    }
+
+    public long countCamerasInError() {
+        return cameraRepository.countByStatus(CameraStatus.ERROR);
+    }
+
+    // ==================== MÉTHODE DE MAPPING ====================
+
     private CameraResponse mapToResponse(Camera camera) {
         return CameraResponse.builder()
                 .id(camera.getId())

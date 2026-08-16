@@ -351,16 +351,17 @@ public class RuleServiceImpl implements RuleService {
             }
         }
 
-        if (rule.getThresholdTime() != null) {
-            boolean exceeded = presenceTime >= rule.getThresholdTime();
-            if (exceeded) {
-                log.info("Présence prolongée détectée: {} secondes (seuil: {})",
-                        presenceTime, rule.getThresholdTime());
-            }
-            return exceeded;
-        }
+        // ✅ Utilisation de Constants.DEFAULT_PRESENCE_THRESHOLD
+        long threshold = rule.getThresholdTime() != null
+                ? rule.getThresholdTime()
+                : Constants.DEFAULT_PRESENCE_THRESHOLD;
 
-        return false;
+        boolean exceeded = presenceTime >= threshold;
+        if (exceeded) {
+            log.info("Présence prolongée détectée: {} secondes (seuil: {})",
+                    presenceTime, threshold);
+        }
+        return exceeded;
     }
 
     private boolean evaluateObjectRule(Rule rule, Object context) {
@@ -567,7 +568,7 @@ public class RuleServiceImpl implements RuleService {
 
     private double getSensitivityThreshold(Integer sensitivity) {
         if (sensitivity == null) {
-            return 0.5;
+            return Constants.DEFAULT_CONFIDENCE_THRESHOLD;
         }
         return 1.0 - (sensitivity / 100.0) * 0.8;
     }

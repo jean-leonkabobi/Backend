@@ -91,13 +91,11 @@ public class AlertServiceImpl implements AlertService {
 
         alert = alertRepository.save(alert);
 
-        // ✅ Utilisation de Constants.AUDIT_ACTION_ALERT_CREATED
         auditLogService.logAction(null, Constants.AUDIT_ACTION_ALERT_CREATED,
                 "Alerte créée: " + alert.getType() + " - " + alert.getSeverity());
 
         AlertResponse response = mapToResponse(alert);
 
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
         CompletableFuture<Void> futureWebSocket = AsyncUtils.runAsync(
                 () -> webSocketService.broadcastAlert(response),
                 notificationExecutor,
@@ -108,7 +106,6 @@ public class AlertServiceImpl implements AlertService {
             return null;
         });
 
-        // ✅ Création de la variable finale pour la lambda
         final Alert savedAlert = alert;
 
         if (savedAlert.getSeverity() == AlertSeverity.CRITICAL || savedAlert.getSeverity() == AlertSeverity.HIGH) {
@@ -134,6 +131,12 @@ public class AlertServiceImpl implements AlertService {
         try {
             Alert alert = alertRepository.findById(id)
                     .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", id));
+
+            // ✅ Utilisation de Constants.ALERT_PROCESSING_TIMEOUT
+            if (alert.getCreatedAt() != null &&
+                    DateUtils.secondsBetween(alert.getCreatedAt(), LocalDateTime.now()) > Constants.ALERT_PROCESSING_TIMEOUT / 1000) {
+                log.warn("Alerte {} traitée après le délai de traitement (timeout: {} ms)", id, Constants.ALERT_PROCESSING_TIMEOUT);
+            }
 
             alert.setStatus(request.getStatus());
 
@@ -261,7 +264,6 @@ public class AlertServiceImpl implements AlertService {
             alert.setResolutionNotes(notes);
             alert = alertRepository.save(alert);
 
-            // ✅ Utilisation de Constants.AUDIT_ACTION_ALERT_RESOLVED
             auditLogService.logAction(null, Constants.AUDIT_ACTION_ALERT_RESOLVED,
                     "Alerte résolue: " + id + " -> " + resolutionStatus);
 
@@ -359,32 +361,44 @@ public class AlertServiceImpl implements AlertService {
             throw new BadRequestException("La date de début ne peut pas être dans le futur");
         }
 
-        // ✅ Utilisation de Constants.MAX_ALERTS_PER_PAGE
         int safeSize = Math.min(size, Constants.MAX_ALERTS_PER_PAGE);
-        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
+        Sort.Direction direction = Constants.DEFAULT_SORT_DIRECTION.equals("ASC")
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(direction, Constants.DEFAULT_SORT_FIELD));
+
 
         return alertRepository.findAlertsWithFilters(status, severity, cameraId, startDate, endDate, pageable)
                 .map(this::mapToResponse);
     }
 
     public Page<AlertResponse> getAlertsByStatusPaginated(AlertStatus status, int page, int size) {
-        // ✅ Utilisation de Constants.MAX_ALERTS_PER_PAGE
         int safeSize = Math.min(size, Constants.MAX_ALERTS_PER_PAGE);
-        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
+        Sort.Direction direction = Constants.DEFAULT_SORT_DIRECTION.equals("ASC")
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(direction, Constants.DEFAULT_SORT_FIELD));
+
         return alertRepository.findByStatus(status, pageable).map(this::mapToResponse);
     }
 
     public Page<AlertResponse> getAlertsBySeverityPaginated(AlertSeverity severity, int page, int size) {
-        // ✅ Utilisation de Constants.MAX_ALERTS_PER_PAGE
         int safeSize = Math.min(size, Constants.MAX_ALERTS_PER_PAGE);
-        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
+        Sort.Direction direction = Constants.DEFAULT_SORT_DIRECTION.equals("ASC")
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(direction, Constants.DEFAULT_SORT_FIELD));
+
         return alertRepository.findBySeverity(severity, pageable).map(this::mapToResponse);
     }
 
     public Page<AlertResponse> getAlertsByCameraPaginated(UUID cameraId, int page, int size) {
-        // ✅ Utilisation de Constants.MAX_ALERTS_PER_PAGE
         int safeSize = Math.min(size, Constants.MAX_ALERTS_PER_PAGE);
-        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
+        Sort.Direction direction = Constants.DEFAULT_SORT_DIRECTION.equals("ASC")
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(page, safeSize, Sort.by(direction, Constants.DEFAULT_SORT_FIELD));
+
         return alertRepository.findByCameraId(cameraId, pageable).map(this::mapToResponse);
     }
 
