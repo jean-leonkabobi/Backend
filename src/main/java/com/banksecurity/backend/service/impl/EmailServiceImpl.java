@@ -5,10 +5,14 @@ import com.banksecurity.backend.integration.email.EmailMessage;
 import com.banksecurity.backend.model.Alert;
 import com.banksecurity.backend.model.User;
 import com.banksecurity.backend.service.EmailService;
+import com.banksecurity.backend.util.AsyncUtils;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 @Slf4j
 @Service
@@ -17,8 +21,10 @@ public class EmailServiceImpl implements EmailService {
 
     private final EmailClient emailClient;
 
+    @Resource(name = "notificationExecutor")
+    private Executor notificationExecutor;
+
     @Override
-    @Async("notificationExecutor")
     public void sendAlertEmail(Alert alert, byte[] imageData) {
         if (!emailClient.isConfigured()) {
             log.warn("Email non configuré. Impossible d'envoyer l'alerte.");
@@ -35,12 +41,21 @@ public class EmailServiceImpl implements EmailService {
                 .html(true)
                 .build();
 
-        emailClient.sendHtmlEmail(message);
-        log.info("Email d'alerte envoyé: {} - {}", alert.getType(), alert.getSeverity());
+        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
+        CompletableFuture<Void> future = AsyncUtils.runAsync(
+                () -> emailClient.sendHtmlEmail(message),
+                notificationExecutor,
+                "Envoi email alerte " + alert.getId()
+        );
+        future.exceptionally(e -> {
+            log.error("Erreur lors de l'envoi de l'email d'alerte: {}", e.getMessage());
+            return null;
+        });
+
+        log.info("Email d'alerte envoyé (async): {} - {}", alert.getType(), alert.getSeverity());
     }
 
     @Override
-    @Async("notificationExecutor")
     public void sendNotificationEmail(String to, String subject, String content) {
         if (!emailClient.isConfigured()) {
             log.warn("Email non configuré. Impossible d'envoyer la notification.");
@@ -54,12 +69,21 @@ public class EmailServiceImpl implements EmailService {
                 .html(false)
                 .build();
 
-        emailClient.sendSimpleEmail(message);
-        log.info("Email de notification envoyé à: {}", to);
+        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
+        CompletableFuture<Void> future = AsyncUtils.runAsync(
+                () -> emailClient.sendSimpleEmail(message),
+                notificationExecutor,
+                "Envoi notification à " + to
+        );
+        future.exceptionally(e -> {
+            log.error("Erreur lors de l'envoi de la notification: {}", e.getMessage());
+            return null;
+        });
+
+        log.info("Email de notification envoyé (async) à: {}", to);
     }
 
     @Override
-    @Async("notificationExecutor")
     public void sendWelcomeEmail(User user) {
         String subject = "Bienvenue sur Bank Security System";
         String content = String.format(
@@ -79,7 +103,6 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
-    @Async("notificationExecutor")
     public void sendPasswordResetEmail(User user, String resetToken) {
         String subject = "Réinitialisation de votre mot de passe";
         String content = String.format(
@@ -99,7 +122,6 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
-    @Async("notificationExecutor")
     public void sendAccountLockedEmail(User user) {
         String subject = "Compte verrouillé - Bank Security System";
         String content = String.format(
@@ -116,7 +138,6 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
-    @Async("notificationExecutor")
     public void sendAccountUnlockedEmail(User user) {
         String subject = "Compte déverrouillé - Bank Security System";
         String content = String.format(
@@ -132,7 +153,6 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
-    @Async("notificationExecutor")
     public void sendDailyReportEmail(String to, String reportContent) {
         String subject = "Rapport quotidien de sécurité";
         sendNotificationEmail(to, subject, reportContent);
@@ -143,9 +163,6 @@ public class EmailServiceImpl implements EmailService {
         return emailClient.isConfigured();
     }
 
-    /**
-     * Construit le contenu HTML de l'email d'alerte
-     */
     private String buildAlertEmailContent(Alert alert) {
         StringBuilder content = new StringBuilder();
         content.append("<html><body>");

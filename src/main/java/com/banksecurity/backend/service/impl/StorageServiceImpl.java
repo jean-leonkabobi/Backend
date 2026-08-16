@@ -4,9 +4,11 @@ import com.banksecurity.backend.config.StorageConfig;
 import com.banksecurity.backend.exception.BadRequestException;
 import com.banksecurity.backend.exception.ResourceNotFoundException;
 import com.banksecurity.backend.service.StorageService;
+import com.banksecurity.backend.util.AsyncUtils;
+import com.banksecurity.backend.util.Constants;
+import com.banksecurity.backend.util.DateUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -19,6 +21,8 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -27,6 +31,10 @@ import java.util.stream.Stream;
 public class StorageServiceImpl implements StorageService {
 
     private final StorageConfig storageConfig;
+
+    // ✅ Utilisation de @jakarta.annotation.Resource qualifié pour éviter le conflit
+    @jakarta.annotation.Resource(name = "storageExecutor")
+    private Executor storageExecutor;
 
     @Override
     public String saveImage(MultipartFile file) throws IOException {
@@ -57,17 +65,32 @@ public class StorageServiceImpl implements StorageService {
         String newFilename = generateUniqueFilename(filename);
         Path targetPath = Paths.get(storageConfig.getImagesPath()).resolve(newFilename);
 
-        Files.write(targetPath, imageData);
+        // ✅ Utilisation de AsyncUtils.runAsync(Supplier)
+        CompletableFuture<Void> future = AsyncUtils.runAsync(
+                () -> {
+                    try {
+                        Files.write(targetPath, imageData);
+                        return null;
+                    } catch (IOException e) {
+                        throw new RuntimeException("Erreur d'écriture du fichier", e);
+                    }
+                },
+                storageExecutor,
+                "Sauvegarde image " + newFilename
+        );
+
+        // Attendre la fin de l'écriture asynchrone
+        future.join();
 
         log.info("Image sauvegardée (bytes): {}", targetPath);
         return targetPath.toString();
     }
 
     @Override
-    public Resource loadImage(String filename) {
+    public org.springframework.core.io.Resource loadImage(String filename) {
         try {
             Path filePath = Paths.get(storageConfig.getImagesPath()).resolve(filename).normalize();
-            Resource resource = new UrlResource(filePath.toUri());
+            org.springframework.core.io.Resource resource = new UrlResource(filePath.toUri());
 
             if (resource.exists() && resource.isReadable()) {
                 return resource;
@@ -85,10 +108,10 @@ public class StorageServiceImpl implements StorageService {
     }
 
     @Override
-    public Resource loadVideo(String filename) {
+    public org.springframework.core.io.Resource loadVideo(String filename) {
         try {
             Path filePath = Paths.get(storageConfig.getVideosPath()).resolve(filename).normalize();
-            Resource resource = new UrlResource(filePath.toUri());
+            org.springframework.core.io.Resource resource = new UrlResource(filePath.toUri());
 
             if (resource.exists() && resource.isReadable()) {
                 return resource;
@@ -129,8 +152,8 @@ public class StorageServiceImpl implements StorageService {
 
     @Override
     public void cleanupExpiredFiles() {
-        cleanupDirectory(storageConfig.getImagesPath(), 90);
-        cleanupDirectory(storageConfig.getVideosPath(), 30);
+        cleanupDirectory(storageConfig.getImagesPath(), Constants.IMAGE_RETENTION_DAYS);
+        cleanupDirectory(storageConfig.getVideosPath(), Constants.VIDEO_RETENTION_DAYS);
         log.info("Nettoyage des fichiers expirés effectué");
     }
 
@@ -141,7 +164,7 @@ public class StorageServiceImpl implements StorageService {
                 return;
             }
 
-            LocalDateTime cutoff = LocalDateTime.now().minusDays(daysToKeep);
+            LocalDateTime cutoff = DateUtils.daysAgo(daysToKeep);
 
             try (Stream<Path> files = Files.list(directory)) {
                 files.filter(Files::isRegularFile)
@@ -152,7 +175,7 @@ public class StorageServiceImpl implements StorageService {
                                         .atZone(java.time.ZoneId.systemDefault())
                                         .toLocalDateTime();
 
-                                if (lastModified.isBefore(cutoff)) {
+                                if (DateUtils.isPast(lastModified) && lastModified.isBefore(cutoff)) {
                                     Files.deleteIfExists(file);
                                     log.info("Fichier expiré supprimé: {}", file);
                                 }

@@ -2,6 +2,8 @@ package com.banksecurity.backend.util;
 
 /**
  * Constantes globales de l'application
+ * Ces constantes sont utilisées dans différentes parties du projet
+ * et sont conservées pour référence et usage futur.
  */
 public final class Constants {
 

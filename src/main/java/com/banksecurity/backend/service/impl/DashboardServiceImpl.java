@@ -9,6 +9,9 @@ import com.banksecurity.backend.repository.CameraRepository;
 import com.banksecurity.backend.repository.RuleRepository;
 import com.banksecurity.backend.repository.ZoneRepository;
 import com.banksecurity.backend.service.DashboardService;
+import com.banksecurity.backend.util.AsyncUtils;
+import com.banksecurity.backend.util.DateUtils;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,10 +20,13 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.OperatingSystemMXBean;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -33,10 +39,13 @@ public class DashboardServiceImpl implements DashboardService {
     private final ZoneRepository zoneRepository;
     private final RuleRepository ruleRepository;
 
+    @Resource(name = "taskExecutor")
+    private Executor taskExecutor;
+
     @Override
     public DashboardStatsResponse getGlobalStats() {
-        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
-        LocalDateTime previous24h = LocalDateTime.now().minusHours(48);
+        LocalDateTime last24h = DateUtils.hoursAgo(24);
+        LocalDateTime previous24h = DateUtils.hoursAgo(48);
 
         // Statistiques générales
         long totalCameras = cameraRepository.count();
@@ -58,20 +67,41 @@ public class DashboardServiceImpl implements DashboardService {
         long processingAlerts = alertRepository.countAlertsByStatusSince(AlertStatus.PROCESSING, last24h);
         long escalatedAlerts = alertRepository.countAlertsByStatusSince(AlertStatus.ESCALATED, last24h);
 
-        // Statistiques par heure - CORRECTION : utiliser convertToIntMap
-        Map<Integer, Long> alertsByHour = convertToIntMap(
-                alertRepository.countAlertsByHourSince(last24h)
+        // ✅ Utilisation de AsyncUtils.runAsync(Supplier) pour les statistiques en parallèle
+        CompletableFuture<Map<?, Long>> alertsByHourFuture = AsyncUtils.runAsync(
+                () -> convertToIntMap(alertRepository.countAlertsByHourSince(last24h)),
+                taskExecutor,
+                "Statistiques alertes par heure"
         );
 
-        // Statistiques par type
-        Map<String, Long> alertsByType = convertToStringMap(
-                alertRepository.countAlertsByTypeSince(last24h)
+        CompletableFuture<Map<?, Long>> alertsByTypeFuture = AsyncUtils.runAsync(
+                () -> convertToStringMap(alertRepository.countAlertsByTypeSince(last24h)),
+                taskExecutor,
+                "Statistiques alertes par type"
         );
 
-        // Statistiques par caméra
-        Map<String, Long> alertsByCamera = convertToStringMap(
-                alertRepository.countAlertsByCameraSince(last24h)
+        CompletableFuture<Map<?, Long>> alertsByCameraFuture = AsyncUtils.runAsync(
+                () -> convertToStringMap(alertRepository.countAlertsByCameraSince(last24h)),
+                taskExecutor,
+                "Statistiques alertes par caméra"
         );
+
+        // ✅ Utilisation de AsyncUtils.allOf(List) avec un type commun
+        List<CompletableFuture<Map<?, Long>>> futures = new ArrayList<>();
+        futures.add(alertsByHourFuture);
+        futures.add(alertsByTypeFuture);
+        futures.add(alertsByCameraFuture);
+
+        List<Map<?, Long>> parallelResults = AsyncUtils.allOf(futures).join();
+
+        @SuppressWarnings("unchecked")
+        Map<Integer, Long> alertsByHour = (Map<Integer, Long>) parallelResults.get(0);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Long> alertsByType = (Map<String, Long>) parallelResults.get(1);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Long> alertsByCamera = (Map<String, Long>) parallelResults.get(2);
 
         // Tendances
         long previousTotalAlerts = alertRepository.countAlertsSince(previous24h) - totalAlerts24h;
@@ -80,10 +110,9 @@ public class DashboardServiceImpl implements DashboardService {
         long previousCriticalAlerts = alertRepository.countAlertsBySeveritySince(AlertSeverity.CRITICAL, previous24h) - criticalAlerts24h;
         double criticalTrend = calculateTrendPercentage(criticalAlerts24h, previousCriticalAlerts);
 
-        // Top caméras par alertes - CORRECTION : utiliser les bons types
+        // Top caméras par alertes
         List<DashboardStatsResponse.CameraAlertStats> topCameras = getTopCamerasByAlerts(5).entrySet().stream()
                 .map(entry -> {
-                    // Récupérer le nom de la caméra à partir du repository
                     String cameraName = cameraRepository.findById(entry.getKey())
                             .map(camera -> camera.getName())
                             .orElse("Caméra inconnue");
@@ -126,7 +155,6 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public DashboardStatsResponse getStatsForPeriod(LocalDateTime start, LocalDateTime end) {
-        // Implémentation similaire avec une période personnalisée
         long totalAlerts = alertRepository.findByCreatedAtBetween(start, end).size();
 
         return DashboardStatsResponse.builder()
@@ -140,40 +168,35 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public Map<Integer, Long> getAlertsByHour() {
-        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
+        LocalDateTime last24h = DateUtils.hoursAgo(24);
         return convertToIntMap(alertRepository.countAlertsByHourSince(last24h));
     }
 
     @Override
     public Map<String, Long> getAlertsByType() {
-        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
+        LocalDateTime last24h = DateUtils.hoursAgo(24);
         return convertToStringMap(alertRepository.countAlertsByTypeSince(last24h));
     }
 
     @Override
     public Map<String, Long> getAlertsByCamera() {
-        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
+        LocalDateTime last24h = DateUtils.hoursAgo(24);
         return convertToStringMap(alertRepository.countAlertsByCameraSince(last24h));
     }
 
     @Override
     public Map<UUID, Long> getTopCamerasByAlerts(int limit) {
-        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
+        LocalDateTime last24h = DateUtils.hoursAgo(24);
         List<Object[]> results = alertRepository.countAlertsByCameraSince(last24h);
 
         Map<UUID, Long> topCameras = new HashMap<>();
 
-        // Note: Le résultat de countAlertsByCameraSince retourne [cameraName, count]
-        // Pour obtenir les UUID, il faudrait ajuster la requête dans le repository
-
-        // Solution temporaire : chercher les caméras par nom
-        for (int i = 0; i < Math.min(limit, results.size()); i++) {
-            Object[] result = results.get(i);
+        // ✅ Boucle for-each au lieu de la boucle traditionnelle
+        for (Object[] result : results) {
             if (result.length >= 2 && result[0] != null && result[1] != null) {
                 String cameraName = result[0].toString();
                 long alertCount = Long.parseLong(result[1].toString());
 
-                // Chercher la caméra par son nom
                 cameraRepository.findAll().stream()
                         .filter(camera -> camera.getName().equals(cameraName))
                         .findFirst()
@@ -186,8 +209,8 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public double calculateAlertTrend() {
-        LocalDateTime last24h = LocalDateTime.now().minusHours(24);
-        LocalDateTime previous24h = LocalDateTime.now().minusHours(48);
+        LocalDateTime last24h = DateUtils.hoursAgo(24);
+        LocalDateTime previous24h = DateUtils.hoursAgo(48);
 
         long currentAlerts = alertRepository.countAlertsSince(last24h);
         long previousAlerts = alertRepository.countAlertsSince(previous24h) - currentAlerts;
@@ -227,9 +250,6 @@ public class DashboardServiceImpl implements DashboardService {
         return alertRepository.findByStatus(AlertStatus.ESCALATED).size();
     }
 
-    /**
-     * Convertit une liste d'Object[] en Map<String, Long>
-     */
     private Map<String, Long> convertToStringMap(List<Object[]> results) {
         Map<String, Long> map = new HashMap<>();
         for (Object[] result : results) {
@@ -240,9 +260,6 @@ public class DashboardServiceImpl implements DashboardService {
         return map;
     }
 
-    /**
-     * Convertit une liste d'Object[] en Map<Integer, Long>
-     */
     private Map<Integer, Long> convertToIntMap(List<Object[]> results) {
         Map<Integer, Long> map = new HashMap<>();
         for (Object[] result : results) {
@@ -257,9 +274,6 @@ public class DashboardServiceImpl implements DashboardService {
         return map;
     }
 
-    /**
-     * Calcule le pourcentage de tendance
-     */
     private double calculateTrendPercentage(long current, long previous) {
         if (previous == 0) {
             return current > 0 ? 100.0 : 0.0;
