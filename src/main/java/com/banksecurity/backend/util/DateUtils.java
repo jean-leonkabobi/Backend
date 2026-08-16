@@ -52,7 +52,7 @@ public final class DateUtils {
     }
 
     /**
-     * Formate une date courte (sans heure)
+     * Formate date
      */
     public static String formatShort(LocalDateTime dateTime) {
         if (dateTime == null) return null;

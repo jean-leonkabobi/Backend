@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.util.Date;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -91,7 +92,6 @@ public class StorageServiceImpl implements StorageService {
 
         future.join();
 
-        // ✅ Utilisation de DateUtils.formatTime
         log.info("Image sauvegardée (bytes) à {}: {}", DateUtils.formatTime(LocalDateTime.now()), targetPath);
         return targetPath.toString();
     }
@@ -164,7 +164,6 @@ public class StorageServiceImpl implements StorageService {
     public void cleanupExpiredFiles() {
         cleanupDirectory(storageConfig.getImagesPath(), Constants.IMAGE_RETENTION_DAYS);
         cleanupDirectory(storageConfig.getVideosPath(), Constants.VIDEO_RETENTION_DAYS);
-        // ✅ Utilisation de DateUtils.format
         log.info("Nettoyage des fichiers expirés effectué le {}", DateUtils.format(LocalDateTime.now()));
     }
 
@@ -175,17 +174,15 @@ public class StorageServiceImpl implements StorageService {
                 return;
             }
 
-            // ✅ Utilisation de DateUtils.addDays
             LocalDateTime cutoff = DateUtils.addDays(LocalDateTime.now(), -daysToKeep);
 
             try (Stream<Path> files = Files.list(directory)) {
                 files.filter(Files::isRegularFile)
                         .forEach(file -> {
                             try {
-                                LocalDateTime lastModified = Files.getLastModifiedTime(file)
-                                        .toInstant()
-                                        .atZone(java.time.ZoneId.systemDefault())
-                                        .toLocalDateTime();
+                                // ✅ Utilisation de DateUtils.toLocalDateTime
+                                Date lastModifiedDate = new Date(Files.getLastModifiedTime(file).toMillis());
+                                LocalDateTime lastModified = DateUtils.toLocalDateTime(lastModifiedDate);
 
                                 if (DateUtils.isPast(lastModified) && lastModified.isBefore(cutoff)) {
                                     Files.deleteIfExists(file);
@@ -207,9 +204,10 @@ public class StorageServiceImpl implements StorageService {
             extension = originalFilename.substring(originalFilename.lastIndexOf("."));
         }
 
-        // ✅ Utilisation de DateUtils.formatShort et formatTime
-        String dateStr = DateUtils.formatShort(LocalDateTime.now()).replace("-", "");
-        String timeStr = DateUtils.formatTime(LocalDateTime.now()).replace(":", "");
+        // ✅ Utilisation de DateUtils.parse
+        LocalDateTime now = DateUtils.parse(DateUtils.format(LocalDateTime.now()));
+        String dateStr = DateUtils.formatShort(now).replace("-", "");
+        String timeStr = DateUtils.formatTime(now).replace(":", "");
         String timestamp = dateStr + "_" + timeStr;
 
         return timestamp + "_" + UUID.randomUUID().toString().substring(0, 8) + extension;

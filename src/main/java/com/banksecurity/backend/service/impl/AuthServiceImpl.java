@@ -15,6 +15,7 @@ import com.banksecurity.backend.security.UserPrincipal;
 import com.banksecurity.backend.service.AuthService;
 import com.banksecurity.backend.service.AuditLogService;
 import com.banksecurity.backend.util.Constants;
+import com.banksecurity.backend.util.DateUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -68,7 +69,9 @@ public class AuthServiceImpl implements AuthService {
             user.setFailedAttempts(0);
             userRepository.save(user);
 
-            // ✅ Utilisation de Constants.AUDIT_ACTION_LOGIN
+            // ✅ Utilisation de DateUtils.toDate
+            log.debug("Date de dernière connexion (Date): {}", DateUtils.toDate(user.getLastLogin()));
+
             auditLogService.logAction(user.getId(), Constants.AUDIT_ACTION_LOGIN, "Connexion réussie");
 
             log.info("Utilisateur connecté: {}", userPrincipal.getEmail());
@@ -203,7 +206,6 @@ public class AuthServiceImpl implements AuthService {
         }
 
         UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
-        // ✅ Utilisation de Constants.AUDIT_ACTION_LOGOUT
         auditLogService.logAction(userPrincipal.getId(), Constants.AUDIT_ACTION_LOGOUT, "Déconnexion");
         log.info("Utilisateur déconnecté: {}", userPrincipal.getEmail());
 

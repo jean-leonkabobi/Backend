@@ -45,8 +45,9 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public DashboardStatsResponse getGlobalStats() {
-        LocalDateTime last24h = DateUtils.hoursAgo(24);
-        LocalDateTime previous24h = DateUtils.hoursAgo(48);
+        // ✅ Utilisation de DateUtils.addHours
+        LocalDateTime last24h = DateUtils.addHours(LocalDateTime.now(), -24);
+        LocalDateTime previous24h = DateUtils.addHours(LocalDateTime.now(), -48);
 
         long totalCameras = cameraRepository.count();
         long activeCameras = cameraRepository.countByStatus(CameraStatus.ACTIVE);
@@ -148,7 +149,6 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public DashboardStatsResponse getStatsForPeriod(LocalDateTime start, LocalDateTime end) {
-        // ✅ Utilisation de DateUtils.hoursBetween
         long hoursBetween = DateUtils.hoursBetween(start, end);
         log.debug("Période de statistiques: {} heures", hoursBetween);
 
@@ -165,28 +165,26 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public Map<Integer, Long> getAlertsByHour() {
-        LocalDateTime last24h = DateUtils.hoursAgo(24);
-        // ✅ Utilisation de DateUtils.formatShort
+        LocalDateTime last24h = DateUtils.addHours(LocalDateTime.now(), -24);
         log.debug("Statistiques par heure pour le {}", DateUtils.formatShort(DateUtils.daysAgo(0)));
         return convertToIntMap(alertRepository.countAlertsByHourSince(last24h));
     }
 
     @Override
     public Map<String, Long> getAlertsByType() {
-        LocalDateTime last24h = DateUtils.hoursAgo(24);
+        LocalDateTime last24h = DateUtils.addHours(LocalDateTime.now(), -24);
         return convertToStringMap(alertRepository.countAlertsByTypeSince(last24h));
     }
 
     @Override
     public Map<String, Long> getAlertsByCamera() {
-        LocalDateTime last24h = DateUtils.hoursAgo(24);
+        LocalDateTime last24h = DateUtils.addHours(LocalDateTime.now(), -24);
         return convertToStringMap(alertRepository.countAlertsByCameraSince(last24h));
     }
 
     @Override
     public Map<UUID, Long> getTopCamerasByAlerts(int limit) {
-        LocalDateTime last24h = DateUtils.hoursAgo(24);
-        // ✅ Utilisation de DateUtils.minutesBetween
+        LocalDateTime last24h = DateUtils.addHours(LocalDateTime.now(), -24);
         long minutesSince = DateUtils.minutesBetween(last24h, LocalDateTime.now());
         log.debug("Statistiques des {} dernières minutes", minutesSince);
 
@@ -211,8 +209,8 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public double calculateAlertTrend() {
-        LocalDateTime last24h = DateUtils.hoursAgo(24);
-        LocalDateTime previous24h = DateUtils.hoursAgo(48);
+        LocalDateTime last24h = DateUtils.addHours(LocalDateTime.now(), -24);
+        LocalDateTime previous24h = DateUtils.addHours(LocalDateTime.now(), -48);
 
         long currentAlerts = alertRepository.countAlertsSince(last24h);
         long previousAlerts = alertRepository.countAlertsSince(previous24h) - currentAlerts;
@@ -232,7 +230,6 @@ public class DashboardServiceImpl implements DashboardService {
         double cpuUsage = osBean.getSystemLoadAverage();
         double memoryUsage = (double) usedMemory / totalMemory * 100;
 
-        // ✅ Utilisation de DateUtils.formatTime
         String uptimeFormatted = DateUtils.formatTime(LocalDateTime.now().minusSeconds(ManagementFactory.getRuntimeMXBean().getUptime() / 1000));
 
         return DashboardStatsResponse.SystemInfo.builder()

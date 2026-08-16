@@ -13,6 +13,7 @@ import com.banksecurity.backend.security.UserPrincipal;
 import com.banksecurity.backend.service.AuditLogService;
 import com.banksecurity.backend.service.CameraService;
 import com.banksecurity.backend.util.Constants;
+import com.banksecurity.backend.util.DateUtils;
 import com.banksecurity.backend.util.ValidationUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,7 +53,6 @@ public class CameraServiceImpl implements CameraService {
                 throw new ConflictException("Une caméra avec cette adresse IP existe déjà: " + request.getIpAddress());
             }
 
-            // ✅ Utilisation de Constants.MAX_CAMERAS_PER_SERVER
             if (cameraRepository.count() >= Constants.MAX_CAMERAS_PER_SERVER) {
                 throw new BadRequestException("Nombre maximum de caméras atteint: " + Constants.MAX_CAMERAS_PER_SERVER);
             }
@@ -65,9 +65,7 @@ public class CameraServiceImpl implements CameraService {
                     .model(request.getModel())
                     .manufacturer(request.getManufacturer())
                     .status(CameraStatus.INACTIVE)
-                    // ✅ Utilisation de Constants.DEFAULT_CAMERA_RESOLUTION
                     .resolution(request.getResolution() != null ? request.getResolution() : Constants.DEFAULT_CAMERA_RESOLUTION)
-                    // ✅ Utilisation de Constants.DEFAULT_CAMERA_FPS
                     .fps(request.getFps() != null ? request.getFps() : Constants.DEFAULT_CAMERA_FPS)
                     .isRecording(false)
                     .isAnalyzing(false)
@@ -75,7 +73,6 @@ public class CameraServiceImpl implements CameraService {
 
             camera = cameraRepository.save(camera);
 
-            // ✅ Utilisation de Constants.AUDIT_ACTION_CREATE
             auditLogService.logAction(null, Constants.AUDIT_ACTION_CREATE + "_CAMERA", "Création caméra: " + camera.getName());
             log.info("Caméra créée: {}", camera.getName());
 
@@ -125,7 +122,6 @@ public class CameraServiceImpl implements CameraService {
 
             camera = cameraRepository.save(camera);
 
-            // ✅ Utilisation de Constants.AUDIT_ACTION_UPDATE
             auditLogService.logAction(null, Constants.AUDIT_ACTION_UPDATE + "_CAMERA", "Mise à jour caméra: " + camera.getName());
 
             return mapToResponse(camera);
@@ -154,7 +150,6 @@ public class CameraServiceImpl implements CameraService {
 
             cameraRepository.delete(camera);
 
-            // ✅ Utilisation de Constants.AUDIT_ACTION_DELETE
             auditLogService.logAction(null, Constants.AUDIT_ACTION_DELETE + "_CAMERA", "Suppression caméra: " + camera.getName());
             log.info("Caméra supprimée: {}", camera.getName());
         } catch (ResourceNotFoundException e) {
@@ -262,6 +257,7 @@ public class CameraServiceImpl implements CameraService {
                     .orElseThrow(() -> new ResourceNotFoundException("Caméra", "id", id));
 
             camera.setLastHeartbeat(LocalDateTime.now());
+            log.debug("Heartbeat reçu à {} pour la caméra {}", DateUtils.formatTime(LocalDateTime.now()), camera.getName());
             if (camera.getStatus() == CameraStatus.ERROR) {
                 camera.setStatus(CameraStatus.ACTIVE);
             }
@@ -276,8 +272,9 @@ public class CameraServiceImpl implements CameraService {
 
     @Override
     public List<CameraResponse> checkUnresponsiveCameras() {
-        // ✅ Utilisation de Constants.CAMERA_HEARTBEAT_TIMEOUT
-        LocalDateTime timeout = LocalDateTime.now().minusSeconds(Constants.CAMERA_HEARTBEAT_TIMEOUT / 1000);
+        // ✅ Utilisation de DateUtils.addMinutes
+        LocalDateTime timeout = DateUtils.addMinutes(LocalDateTime.now(), -1);
+        log.debug("Vérification des caméras sans heartbeat depuis: {}", DateUtils.format(timeout));
         return cameraRepository.findCamerasNotResponding(timeout).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
