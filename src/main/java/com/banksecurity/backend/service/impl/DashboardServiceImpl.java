@@ -148,6 +148,10 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public DashboardStatsResponse getStatsForPeriod(LocalDateTime start, LocalDateTime end) {
+        // ✅ Utilisation de DateUtils.hoursBetween
+        long hoursBetween = DateUtils.hoursBetween(start, end);
+        log.debug("Période de statistiques: {} heures", hoursBetween);
+
         long totalAlerts = alertRepository.findByCreatedAtBetween(start, end).size();
 
         return DashboardStatsResponse.builder()
@@ -162,6 +166,8 @@ public class DashboardServiceImpl implements DashboardService {
     @Override
     public Map<Integer, Long> getAlertsByHour() {
         LocalDateTime last24h = DateUtils.hoursAgo(24);
+        // ✅ Utilisation de DateUtils.formatShort
+        log.debug("Statistiques par heure pour le {}", DateUtils.formatShort(DateUtils.daysAgo(0)));
         return convertToIntMap(alertRepository.countAlertsByHourSince(last24h));
     }
 
@@ -180,6 +186,10 @@ public class DashboardServiceImpl implements DashboardService {
     @Override
     public Map<UUID, Long> getTopCamerasByAlerts(int limit) {
         LocalDateTime last24h = DateUtils.hoursAgo(24);
+        // ✅ Utilisation de DateUtils.minutesBetween
+        long minutesSince = DateUtils.minutesBetween(last24h, LocalDateTime.now());
+        log.debug("Statistiques des {} dernières minutes", minutesSince);
+
         List<Object[]> results = alertRepository.countAlertsByCameraSince(last24h);
 
         Map<UUID, Long> topCameras = new HashMap<>();
@@ -222,10 +232,12 @@ public class DashboardServiceImpl implements DashboardService {
         double cpuUsage = osBean.getSystemLoadAverage();
         double memoryUsage = (double) usedMemory / totalMemory * 100;
 
+        // ✅ Utilisation de DateUtils.formatTime
+        String uptimeFormatted = DateUtils.formatTime(LocalDateTime.now().minusSeconds(ManagementFactory.getRuntimeMXBean().getUptime() / 1000));
+
         return DashboardStatsResponse.SystemInfo.builder()
-                // ✅ Utilisation de Constants.APP_VERSION
                 .version(Constants.APP_VERSION)
-                .uptime(ManagementFactory.getRuntimeMXBean().getUptime() + " ms")
+                .uptime(ManagementFactory.getRuntimeMXBean().getUptime() + " ms (depuis " + uptimeFormatted + ")")
                 .totalStorageUsed(usedMemory)
                 .totalStorageAvailable(totalMemory)
                 .cpuUsage(cpuUsage)

@@ -19,7 +19,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -38,7 +37,6 @@ public class StorageServiceImpl implements StorageService {
     @Override
     public String saveImage(MultipartFile file) throws IOException {
         try {
-            // ✅ Utilisation de Constants.MAX_IMAGE_SIZE
             if (file.getSize() > Constants.MAX_IMAGE_SIZE) {
                 throw new BadRequestException("Image trop volumineuse. Taille maximale: " +
                         (Constants.MAX_IMAGE_SIZE / (1024 * 1024)) + " MB");
@@ -53,7 +51,6 @@ public class StorageServiceImpl implements StorageService {
     @Override
     public String saveVideo(MultipartFile file) throws IOException {
         try {
-            // ✅ Utilisation de Constants.MAX_VIDEO_SIZE
             if (file.getSize() > Constants.MAX_VIDEO_SIZE) {
                 throw new BadRequestException("Vidéo trop volumineuse. Taille maximale: " +
                         (Constants.MAX_VIDEO_SIZE / (1024 * 1024)) + " MB");
@@ -71,7 +68,6 @@ public class StorageServiceImpl implements StorageService {
             throw new BadRequestException("Données image vides");
         }
 
-        // ✅ Utilisation de Constants.MAX_IMAGE_SIZE
         if (imageData.length > Constants.MAX_IMAGE_SIZE) {
             throw new BadRequestException("Image trop volumineuse. Taille maximale: " +
                     (Constants.MAX_IMAGE_SIZE / (1024 * 1024)) + " MB");
@@ -95,7 +91,8 @@ public class StorageServiceImpl implements StorageService {
 
         future.join();
 
-        log.info("Image sauvegardée (bytes): {}", targetPath);
+        // ✅ Utilisation de DateUtils.formatTime
+        log.info("Image sauvegardée (bytes) à {}: {}", DateUtils.formatTime(LocalDateTime.now()), targetPath);
         return targetPath.toString();
     }
 
@@ -167,7 +164,8 @@ public class StorageServiceImpl implements StorageService {
     public void cleanupExpiredFiles() {
         cleanupDirectory(storageConfig.getImagesPath(), Constants.IMAGE_RETENTION_DAYS);
         cleanupDirectory(storageConfig.getVideosPath(), Constants.VIDEO_RETENTION_DAYS);
-        log.info("Nettoyage des fichiers expirés effectué");
+        // ✅ Utilisation de DateUtils.format
+        log.info("Nettoyage des fichiers expirés effectué le {}", DateUtils.format(LocalDateTime.now()));
     }
 
     private void cleanupDirectory(String directoryPath, int daysToKeep) {
@@ -177,7 +175,8 @@ public class StorageServiceImpl implements StorageService {
                 return;
             }
 
-            LocalDateTime cutoff = DateUtils.daysAgo(daysToKeep);
+            // ✅ Utilisation de DateUtils.addDays
+            LocalDateTime cutoff = DateUtils.addDays(LocalDateTime.now(), -daysToKeep);
 
             try (Stream<Path> files = Files.list(directory)) {
                 files.filter(Files::isRegularFile)
@@ -208,7 +207,11 @@ public class StorageServiceImpl implements StorageService {
             extension = originalFilename.substring(originalFilename.lastIndexOf("."));
         }
 
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        // ✅ Utilisation de DateUtils.formatShort et formatTime
+        String dateStr = DateUtils.formatShort(LocalDateTime.now()).replace("-", "");
+        String timeStr = DateUtils.formatTime(LocalDateTime.now()).replace(":", "");
+        String timestamp = dateStr + "_" + timeStr;
+
         return timestamp + "_" + UUID.randomUUID().toString().substring(0, 8) + extension;
     }
 }

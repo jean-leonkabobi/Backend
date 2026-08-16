@@ -57,7 +57,7 @@ public class AuditLogServiceImpl implements AuditLogService {
             log.error("Erreur lors de l'audit: {}", e.getMessage());
             return null;
         });
-        log.debug("Action auditée (async): {}", action);
+        log.debug("Action auditée (async) le {}: {}", DateUtils.format(LocalDateTime.now()), action);
     }
 
     @Override
@@ -114,7 +114,6 @@ public class AuditLogServiceImpl implements AuditLogService {
 
     @Override
     public List<AuditLog> getLogsByUser(UUID userId) {
-        // ✅ Utilisation de Constants.AUDIT_ACTION_VIEW
         logAction(userId, Constants.AUDIT_ACTION_VIEW, "Consultation des logs utilisateur");
         return auditLogRepository.findByUserId(userId);
     }
@@ -129,12 +128,19 @@ public class AuditLogServiceImpl implements AuditLogService {
         if (DateUtils.isFuture(start) || DateUtils.isFuture(end)) {
             throw new IllegalArgumentException("Les dates ne peuvent pas être dans le futur");
         }
+        long daysBetween = DateUtils.daysBetween(start, end);
+        if (daysBetween > 90) {
+            throw new IllegalArgumentException("La période ne peut pas dépasser 90 jours (actuellement: " + daysBetween + " jours)");
+        }
         return auditLogRepository.findByCreatedAtBetween(start, end);
     }
 
     @Override
     public List<AuditLog> getRecentLogs(int limit) {
-        Pageable pageable = PageRequest.of(0, limit, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
+        Sort.Direction direction = Constants.DEFAULT_SORT_DIRECTION.equals("ASC")
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(0, limit, Sort.by(direction, Constants.DEFAULT_SORT_FIELD));
         return auditLogRepository.findRecentLogs(pageable);
     }
 
@@ -162,7 +168,10 @@ public class AuditLogServiceImpl implements AuditLogService {
     }
 
     public Page<AuditLog> getLogsByUserPaginated(UUID userId, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
+        Sort.Direction direction = Constants.DEFAULT_SORT_DIRECTION.equals("ASC")
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, Constants.DEFAULT_SORT_FIELD));
         return auditLogRepository.findByUserId(userId, pageable);
     }
 
@@ -195,12 +204,17 @@ public class AuditLogServiceImpl implements AuditLogService {
             int page,
             int size) {
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
+        Sort.Direction direction = Constants.DEFAULT_SORT_DIRECTION.equals("ASC")
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, Constants.DEFAULT_SORT_FIELD));
         return auditLogRepository.findLogsWithFilters(userId, action, startDate, endDate, pageable);
     }
 
     public Map<String, Long> getTopActions(int limit) {
         LocalDateTime since = DateUtils.daysAgo(Constants.DEFAULT_ALERT_RETENTION_DAYS);
+        // ✅ Correction : Utiliser format(LocalDateTime) directement
+        log.debug("Top actions depuis le {}", DateUtils.format(since));
         return countActionsSince(since).entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(limit)

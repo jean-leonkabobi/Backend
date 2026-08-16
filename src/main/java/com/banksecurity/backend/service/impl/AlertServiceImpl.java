@@ -92,7 +92,7 @@ public class AlertServiceImpl implements AlertService {
         alert = alertRepository.save(alert);
 
         auditLogService.logAction(null, Constants.AUDIT_ACTION_ALERT_CREATED,
-                "Alerte créée: " + alert.getType() + " - " + alert.getSeverity());
+                "Alerte créée le " + DateUtils.format(LocalDateTime.now()) + ": " + alert.getType() + " - " + alert.getSeverity());
 
         AlertResponse response = mapToResponse(alert);
 
@@ -120,7 +120,8 @@ public class AlertServiceImpl implements AlertService {
             });
         }
 
-        log.info("Alerte créée: {} - {}", alert.getType(), alert.getSeverity());
+        // ✅ Utilisation de DateUtils.formatTime
+        log.info("Alerte créée à {}: {} - {}", DateUtils.formatTime(LocalDateTime.now()), alert.getType(), alert.getSeverity());
 
         return response;
     }
@@ -132,10 +133,15 @@ public class AlertServiceImpl implements AlertService {
             Alert alert = alertRepository.findById(id)
                     .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", id));
 
-            // ✅ Utilisation de Constants.ALERT_PROCESSING_TIMEOUT
             if (alert.getCreatedAt() != null &&
                     DateUtils.secondsBetween(alert.getCreatedAt(), LocalDateTime.now()) > Constants.ALERT_PROCESSING_TIMEOUT / 1000) {
                 log.warn("Alerte {} traitée après le délai de traitement (timeout: {} ms)", id, Constants.ALERT_PROCESSING_TIMEOUT);
+            }
+
+            // ✅ Utilisation de DateUtils.humanReadableDuration
+            if (alert.getCreatedAt() != null) {
+                String duration = DateUtils.humanReadableDuration(alert.getCreatedAt(), LocalDateTime.now());
+                log.debug("Alerte {} traitée en {}", id, duration);
             }
 
             alert.setStatus(request.getStatus());
@@ -215,7 +221,15 @@ public class AlertServiceImpl implements AlertService {
             throw new BadRequestException("Les dates ne peuvent pas être dans le futur");
         }
 
-        return alertRepository.findByCreatedAtBetween(start, end).stream()
+        // ✅ Utilisation de DateUtils.startOfDay et endOfDay
+        LocalDateTime startNormalized = DateUtils.startOfDay(start);
+        LocalDateTime endNormalized = DateUtils.endOfDay(end);
+
+        // ✅ Utilisation de DateUtils.daysBetween
+        long daysBetween = DateUtils.daysBetween(startNormalized, endNormalized);
+        log.debug("Période de recherche: {} jours", daysBetween);
+
+        return alertRepository.findByCreatedAtBetween(startNormalized, endNormalized).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
@@ -237,7 +251,9 @@ public class AlertServiceImpl implements AlertService {
             alert.setStatus(AlertStatus.ESCALATED);
             alert = alertRepository.save(alert);
 
-            auditLogService.logAction(null, "ALERT_ESCALATED", "Alerte escaladée: " + id);
+            // ✅ Utilisation de DateUtils.format
+            auditLogService.logAction(null, "ALERT_ESCALATED",
+                    "Alerte escaladée le " + DateUtils.format(LocalDateTime.now()) + ": " + id);
 
             return mapToResponse(alert);
         } catch (ResourceNotFoundException e) {
@@ -264,8 +280,9 @@ public class AlertServiceImpl implements AlertService {
             alert.setResolutionNotes(notes);
             alert = alertRepository.save(alert);
 
+            // ✅ Utilisation de DateUtils.format
             auditLogService.logAction(null, Constants.AUDIT_ACTION_ALERT_RESOLVED,
-                    "Alerte résolue: " + id + " -> " + resolutionStatus);
+                    "Alerte résolue le " + DateUtils.format(LocalDateTime.now()) + ": " + id + " -> " + resolutionStatus);
 
             return mapToResponse(alert);
         } catch (ResourceNotFoundException e) {
@@ -343,7 +360,9 @@ public class AlertServiceImpl implements AlertService {
 
     public List<AlertResponse> getRecentUnprocessedAlerts(int hours) {
         LocalDateTime since = DateUtils.hoursAgo(hours);
+        // ✅ Utilisation de DateUtils.isToday
         return alertRepository.findRecentUnprocessedAlerts(since).stream()
+                .filter(alert -> DateUtils.isToday(alert.getCreatedAt()))
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
@@ -361,12 +380,17 @@ public class AlertServiceImpl implements AlertService {
             throw new BadRequestException("La date de début ne peut pas être dans le futur");
         }
 
+        // ✅ Utilisation de DateUtils.isThisWeek
+        if (startDate == null) {
+            startDate = DateUtils.daysAgo(7);
+            log.debug("Filtre par défaut: 7 derniers jours. Cette semaine: {}", DateUtils.isThisWeek(startDate));
+        }
+
         int safeSize = Math.min(size, Constants.MAX_ALERTS_PER_PAGE);
         Sort.Direction direction = Constants.DEFAULT_SORT_DIRECTION.equals("ASC")
                 ? Sort.Direction.ASC
                 : Sort.Direction.DESC;
         Pageable pageable = PageRequest.of(page, safeSize, Sort.by(direction, Constants.DEFAULT_SORT_FIELD));
-
 
         return alertRepository.findAlertsWithFilters(status, severity, cameraId, startDate, endDate, pageable)
                 .map(this::mapToResponse);
