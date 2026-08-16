@@ -10,6 +10,7 @@ import com.banksecurity.backend.repository.RuleRepository;
 import com.banksecurity.backend.repository.ZoneRepository;
 import com.banksecurity.backend.service.DashboardService;
 import com.banksecurity.backend.util.AsyncUtils;
+import com.banksecurity.backend.util.Constants;
 import com.banksecurity.backend.util.DateUtils;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
@@ -47,7 +48,6 @@ public class DashboardServiceImpl implements DashboardService {
         LocalDateTime last24h = DateUtils.hoursAgo(24);
         LocalDateTime previous24h = DateUtils.hoursAgo(48);
 
-        // Statistiques générales
         long totalCameras = cameraRepository.count();
         long activeCameras = cameraRepository.countByStatus(CameraStatus.ACTIVE);
         long camerasInError = cameraRepository.countByStatus(CameraStatus.ERROR);
@@ -55,19 +55,16 @@ public class DashboardServiceImpl implements DashboardService {
         long totalRules = ruleRepository.count();
         long activeRules = ruleRepository.findByIsActiveTrue().size();
 
-        // Alertes des dernières 24h
         long totalAlerts24h = alertRepository.countAlertsSince(last24h);
         long criticalAlerts24h = alertRepository.countAlertsBySeveritySince(AlertSeverity.CRITICAL, last24h);
         long highAlerts24h = alertRepository.countAlertsBySeveritySince(AlertSeverity.HIGH, last24h);
         long mediumAlerts24h = alertRepository.countAlertsBySeveritySince(AlertSeverity.MEDIUM, last24h);
         long infoAlerts24h = alertRepository.countAlertsBySeveritySince(AlertSeverity.INFO, last24h);
 
-        // Alertes non résolues
         long pendingAlerts = alertRepository.countAlertsByStatusSince(AlertStatus.PENDING, last24h);
         long processingAlerts = alertRepository.countAlertsByStatusSince(AlertStatus.PROCESSING, last24h);
         long escalatedAlerts = alertRepository.countAlertsByStatusSince(AlertStatus.ESCALATED, last24h);
 
-        // ✅ Utilisation de AsyncUtils.runAsync(Supplier) pour les statistiques en parallèle
         CompletableFuture<Map<?, Long>> alertsByHourFuture = AsyncUtils.runAsync(
                 () -> convertToIntMap(alertRepository.countAlertsByHourSince(last24h)),
                 taskExecutor,
@@ -86,7 +83,6 @@ public class DashboardServiceImpl implements DashboardService {
                 "Statistiques alertes par caméra"
         );
 
-        // ✅ Utilisation de AsyncUtils.allOf(List) avec un type commun
         List<CompletableFuture<Map<?, Long>>> futures = new ArrayList<>();
         futures.add(alertsByHourFuture);
         futures.add(alertsByTypeFuture);
@@ -103,14 +99,12 @@ public class DashboardServiceImpl implements DashboardService {
         @SuppressWarnings("unchecked")
         Map<String, Long> alertsByCamera = (Map<String, Long>) parallelResults.get(2);
 
-        // Tendances
         long previousTotalAlerts = alertRepository.countAlertsSince(previous24h) - totalAlerts24h;
         double alertTrend = calculateTrendPercentage(totalAlerts24h, previousTotalAlerts);
 
         long previousCriticalAlerts = alertRepository.countAlertsBySeveritySince(AlertSeverity.CRITICAL, previous24h) - criticalAlerts24h;
         double criticalTrend = calculateTrendPercentage(criticalAlerts24h, previousCriticalAlerts);
 
-        // Top caméras par alertes
         List<DashboardStatsResponse.CameraAlertStats> topCameras = getTopCamerasByAlerts(5).entrySet().stream()
                 .map(entry -> {
                     String cameraName = cameraRepository.findById(entry.getKey())
@@ -125,7 +119,6 @@ public class DashboardServiceImpl implements DashboardService {
                 })
                 .collect(Collectors.toList());
 
-        // Informations système
         DashboardStatsResponse.SystemInfo systemInfo = getSystemInfo();
 
         return DashboardStatsResponse.builder()
@@ -191,7 +184,6 @@ public class DashboardServiceImpl implements DashboardService {
 
         Map<UUID, Long> topCameras = new HashMap<>();
 
-        // ✅ Boucle for-each au lieu de la boucle traditionnelle
         for (Object[] result : results) {
             if (result.length >= 2 && result[0] != null && result[1] != null) {
                 String cameraName = result[0].toString();
@@ -231,7 +223,8 @@ public class DashboardServiceImpl implements DashboardService {
         double memoryUsage = (double) usedMemory / totalMemory * 100;
 
         return DashboardStatsResponse.SystemInfo.builder()
-                .version("1.0.0")
+                // ✅ Utilisation de Constants.APP_VERSION
+                .version(Constants.APP_VERSION)
                 .uptime(ManagementFactory.getRuntimeMXBean().getUptime() + " ms")
                 .totalStorageUsed(usedMemory)
                 .totalStorageAvailable(totalMemory)

@@ -32,13 +32,17 @@ public class StorageServiceImpl implements StorageService {
 
     private final StorageConfig storageConfig;
 
-    // ✅ Utilisation de @jakarta.annotation.Resource qualifié pour éviter le conflit
     @jakarta.annotation.Resource(name = "storageExecutor")
     private Executor storageExecutor;
 
     @Override
     public String saveImage(MultipartFile file) throws IOException {
         try {
+            // ✅ Utilisation de Constants.MAX_IMAGE_SIZE
+            if (file.getSize() > Constants.MAX_IMAGE_SIZE) {
+                throw new BadRequestException("Image trop volumineuse. Taille maximale: " +
+                        (Constants.MAX_IMAGE_SIZE / (1024 * 1024)) + " MB");
+            }
             return storageConfig.saveImage(file);
         } catch (IOException e) {
             log.error("Erreur lors de la sauvegarde de l'image: {}", e.getMessage(), e);
@@ -49,6 +53,11 @@ public class StorageServiceImpl implements StorageService {
     @Override
     public String saveVideo(MultipartFile file) throws IOException {
         try {
+            // ✅ Utilisation de Constants.MAX_VIDEO_SIZE
+            if (file.getSize() > Constants.MAX_VIDEO_SIZE) {
+                throw new BadRequestException("Vidéo trop volumineuse. Taille maximale: " +
+                        (Constants.MAX_VIDEO_SIZE / (1024 * 1024)) + " MB");
+            }
             return storageConfig.saveVideo(file);
         } catch (IOException e) {
             log.error("Erreur lors de la sauvegarde de la vidéo: {}", e.getMessage(), e);
@@ -62,10 +71,15 @@ public class StorageServiceImpl implements StorageService {
             throw new BadRequestException("Données image vides");
         }
 
+        // ✅ Utilisation de Constants.MAX_IMAGE_SIZE
+        if (imageData.length > Constants.MAX_IMAGE_SIZE) {
+            throw new BadRequestException("Image trop volumineuse. Taille maximale: " +
+                    (Constants.MAX_IMAGE_SIZE / (1024 * 1024)) + " MB");
+        }
+
         String newFilename = generateUniqueFilename(filename);
         Path targetPath = Paths.get(storageConfig.getImagesPath()).resolve(newFilename);
 
-        // ✅ Utilisation de AsyncUtils.runAsync(Supplier)
         CompletableFuture<Void> future = AsyncUtils.runAsync(
                 () -> {
                     try {
@@ -79,7 +93,6 @@ public class StorageServiceImpl implements StorageService {
                 "Sauvegarde image " + newFilename
         );
 
-        // Attendre la fin de l'écriture asynchrone
         future.join();
 
         log.info("Image sauvegardée (bytes): {}", targetPath);

@@ -1,13 +1,19 @@
 package com.banksecurity.backend.integration.ia;
 
 import com.banksecurity.backend.exception.BadRequestException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.banksecurity.backend.util.Constants;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -19,17 +25,12 @@ import java.util.Map;
 public class IaServiceClient {
 
     private final RestTemplate restTemplate;
-    private final ObjectMapper objectMapper;
 
     @Value("${ia.service.url:http://localhost:8000}")
     private String iaServiceUrl;
 
-    @Value("${ia.service.timeout:5000}")
-    private int timeout;
-
     public IaServiceClient() {
         this.restTemplate = new RestTemplate();
-        this.objectMapper = new ObjectMapper();
     }
 
     /**
@@ -40,8 +41,10 @@ public class IaServiceClient {
 
         try {
             IaDetectionRequest request = IaDetectionRequest.builder()
-                    .imageBase64(java.util.Base64.getEncoder().encodeToString(imageData))
+                    .imageBase64(Base64.getEncoder().encodeToString(imageData))
                     .classesOfInterest(classesOfInterest)
+                    // ✅ Utilisation de Constants.DEFAULT_CONFIDENCE_THRESHOLD
+                    .confidenceThreshold(Constants.DEFAULT_CONFIDENCE_THRESHOLD)
                     .build();
 
             HttpHeaders headers = new HttpHeaders();
@@ -58,17 +61,18 @@ public class IaServiceClient {
 
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
                 log.debug("Détection IA réussie: {} objets détectés",
-                        response.getBody().getDetections() != null ?
-                                response.getBody().getDetections().size() : 0);
+                        response.getBody().getDetections() != null ? response.getBody().getDetections().size() : 0);
                 return response.getBody();
             } else {
                 log.error("Réponse inattendue du service IA: {}", response.getStatusCode());
                 throw new BadRequestException("Erreur lors de la détection IA");
             }
 
+        } catch (BadRequestException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Erreur de communication avec le service IA", e);
-            throw new BadRequestException("Service IA indisponible: " + e.getMessage());
+            throw new BadRequestException("Service IA indisponible: " + e.getMessage(), e);
         }
     }
 
@@ -96,7 +100,11 @@ public class IaServiceClient {
         try {
             Map<String, String> request = Map.of(
                     "camera_id", cameraId,
-                    "rtsp_url", rtspUrl
+                    "rtsp_url", rtspUrl,
+                    // ✅ Utilisation de Constants.DEFAULT_DETECTION_INTERVAL
+                    "detection_interval", String.valueOf(Constants.DEFAULT_DETECTION_INTERVAL),
+                    // ✅ Utilisation de Constants.MAX_DETECTION_BATCH_SIZE
+                    "batch_size", String.valueOf(Constants.MAX_DETECTION_BATCH_SIZE)
             );
 
             HttpHeaders headers = new HttpHeaders();
@@ -119,7 +127,7 @@ public class IaServiceClient {
 
         } catch (Exception e) {
             log.error("Erreur de communication avec le service IA", e);
-            throw new BadRequestException("Impossible de démarrer l'analyse IA: " + e.getMessage());
+            throw new BadRequestException("Impossible de démarrer l'analyse IA: " + e.getMessage(), e);
         }
     }
 
@@ -150,7 +158,7 @@ public class IaServiceClient {
 
         } catch (Exception e) {
             log.error("Erreur lors de l'arrêt de l'analyse IA", e);
-            throw new BadRequestException("Impossible d'arrêter l'analyse IA: " + e.getMessage());
+            throw new BadRequestException("Impossible d'arrêter l'analyse IA: " + e.getMessage(), e);
         }
     }
 
