@@ -6,6 +6,7 @@ import com.banksecurity.backend.model.Alert;
 import com.banksecurity.backend.model.User;
 import com.banksecurity.backend.service.EmailService;
 import com.banksecurity.backend.util.AsyncUtils;
+import com.banksecurity.backend.util.Constants;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,17 +32,19 @@ public class EmailServiceImpl implements EmailService {
             return;
         }
 
-        String subject = "🚨 Alerte de sécurité - " + alert.getSeverity();
+        // ✅ Utilisation de Constants.EMAIL_ALERT_SUBJECT
+        String subject = Constants.EMAIL_ALERT_SUBJECT + alert.getSeverity();
         String content = buildAlertEmailContent(alert);
 
         EmailMessage message = EmailMessage.builder()
+                // ✅ Utilisation de Constants.EMAIL_FROM
+                .from(Constants.EMAIL_FROM)
                 .to(new String[]{"security-team@banksecurity.com"})
                 .subject(subject)
                 .content(content)
                 .html(true)
                 .build();
 
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
         CompletableFuture<Void> future = AsyncUtils.runAsync(
                 () -> emailClient.sendHtmlEmail(message),
                 notificationExecutor,
@@ -63,13 +66,13 @@ public class EmailServiceImpl implements EmailService {
         }
 
         EmailMessage message = EmailMessage.builder()
+                .from(Constants.EMAIL_FROM)
                 .to(new String[]{to})
                 .subject(subject)
                 .content(content)
                 .html(false)
                 .build();
 
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
         CompletableFuture<Void> future = AsyncUtils.runAsync(
                 () -> emailClient.sendSimpleEmail(message),
                 notificationExecutor,
@@ -85,7 +88,7 @@ public class EmailServiceImpl implements EmailService {
 
     @Override
     public void sendWelcomeEmail(User user) {
-        String subject = "Bienvenue sur Bank Security System";
+        String subject = "Bienvenue sur " + Constants.APP_NAME;
         String content = String.format(
                 "Bonjour %s %s,\n\n" +
                         "Votre compte a été créé avec succès.\n" +
@@ -123,7 +126,7 @@ public class EmailServiceImpl implements EmailService {
 
     @Override
     public void sendAccountLockedEmail(User user) {
-        String subject = "Compte verrouillé - Bank Security System";
+        String subject = "Compte verrouillé - " + Constants.APP_NAME;
         String content = String.format(
                 "Bonjour %s %s,\n\n" +
                         "Votre compte a été verrouillé suite à plusieurs tentatives de connexion échouées.\n\n" +
@@ -139,7 +142,7 @@ public class EmailServiceImpl implements EmailService {
 
     @Override
     public void sendAccountUnlockedEmail(User user) {
-        String subject = "Compte déverrouillé - Bank Security System";
+        String subject = "Compte déverrouillé - " + Constants.APP_NAME;
         String content = String.format(
                 "Bonjour %s %s,\n\n" +
                         "Votre compte a été déverrouillé. Vous pouvez maintenant vous connecter.\n\n" +

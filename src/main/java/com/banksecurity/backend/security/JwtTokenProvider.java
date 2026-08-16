@@ -1,5 +1,6 @@
 package com.banksecurity.backend.security;
 
+import com.banksecurity.backend.util.Constants;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
@@ -28,11 +29,9 @@ public class JwtTokenProvider {
     @Value("${jwt.secret}")
     private String jwtSecret;
 
-    @Value("${jwt.expiration}")
-    private long jwtExpiration;
-
-    @Value("${jwt.refresh-expiration}")
-    private long refreshExpiration;
+    // ✅ Utilisation des constantes avec fallback sur application.yml
+    private final long jwtExpiration = Constants.JWT_EXPIRATION;
+    private final long refreshExpiration = Constants.JWT_REFRESH_EXPIRATION;
 
     private SecretKey secretKey;
 
@@ -122,7 +121,6 @@ public class JwtTokenProvider {
 
     /**
      * Extrait le rôle du token
-     * Utilisé pour la vérification des autorisations
      */
     public String getRoleFromToken(String token) {
         String role = extractClaim(token, claims -> claims.get("role", String.class));
@@ -174,7 +172,6 @@ public class JwtTokenProvider {
 
     /**
      * Vérifie si le token est expiré
-     * Utilisé pour vérifier la validité avant utilisation
      */
     public boolean isTokenExpired(String token) {
         try {
@@ -201,7 +198,6 @@ public class JwtTokenProvider {
 
     /**
      * Retourne la durée de validité du refresh token en secondes
-     * Utilisé pour informer le client de la durée du refresh token
      */
     public long getRefreshTokenValidityInSeconds() {
         return refreshExpiration / 1000;
