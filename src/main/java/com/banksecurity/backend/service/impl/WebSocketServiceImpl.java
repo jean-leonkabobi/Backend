@@ -4,6 +4,7 @@ import com.banksecurity.backend.dto.response.AlertResponse;
 import com.banksecurity.backend.dto.response.DashboardStatsResponse;
 import com.banksecurity.backend.service.WebSocketService;
 import com.banksecurity.backend.util.AsyncUtils;
+import com.banksecurity.backend.util.Constants;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,14 +26,13 @@ public class WebSocketServiceImpl implements WebSocketService {
     @Resource(name = "notificationExecutor")
     private Executor notificationExecutor;
 
-    // Map pour suivre les utilisateurs connectés
     private final Map<String, Boolean> connectedUsers = new ConcurrentHashMap<>();
 
     @Override
     public void broadcastAlert(AlertResponse alert) {
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
+        // ✅ Utilisation de Constants.WS_TOPIC_ALERTS
         CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> messagingTemplate.convertAndSend("/topic/alerts", alert),
+                () -> messagingTemplate.convertAndSend(Constants.WS_TOPIC_ALERTS, alert),
                 notificationExecutor,
                 "Diffusion alerte " + alert.getId()
         );
@@ -40,15 +40,14 @@ public class WebSocketServiceImpl implements WebSocketService {
             log.error("Erreur lors de la diffusion de l'alerte: {}", e.getMessage());
             return null;
         });
-
         log.debug("Alerte diffusée via WebSocket (async): {}", alert.getId());
     }
 
     @Override
     public void sendAlertToUser(String username, AlertResponse alert) {
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
+        // ✅ Utilisation de Constants.WS_QUEUE_USER
         CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> messagingTemplate.convertAndSendToUser(username, "/queue/alerts", alert),
+                () -> messagingTemplate.convertAndSendToUser(username, Constants.WS_QUEUE_USER + "/alerts", alert),
                 notificationExecutor,
                 "Envoi alerte à " + username
         );
@@ -61,9 +60,9 @@ public class WebSocketServiceImpl implements WebSocketService {
 
     @Override
     public void broadcastStats(DashboardStatsResponse stats) {
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
+        // ✅ Utilisation de Constants.WS_TOPIC_STATS
         CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> messagingTemplate.convertAndSend("/topic/stats", stats),
+                () -> messagingTemplate.convertAndSend(Constants.WS_TOPIC_STATS, stats),
                 notificationExecutor,
                 "Diffusion statistiques"
         );
@@ -77,9 +76,9 @@ public class WebSocketServiceImpl implements WebSocketService {
     @Override
     public void broadcastCameraStatus(String cameraId, String status) {
         CameraStatusMessage message = new CameraStatusMessage(cameraId, status);
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
+        // ✅ Utilisation de Constants.WS_TOPIC_CAMERAS
         CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> messagingTemplate.convertAndSend("/topic/cameras", message),
+                () -> messagingTemplate.convertAndSend(Constants.WS_TOPIC_CAMERAS, message),
                 notificationExecutor,
                 "Diffusion statut caméra " + cameraId
         );
@@ -92,7 +91,6 @@ public class WebSocketServiceImpl implements WebSocketService {
 
     @Override
     public void sendToTopic(String topic, Object message) {
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
         CompletableFuture<Void> future = AsyncUtils.runAsync(
                 () -> messagingTemplate.convertAndSend(topic, message),
                 notificationExecutor,

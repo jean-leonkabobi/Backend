@@ -1,6 +1,7 @@
 package com.banksecurity.backend.config;
 
 import com.banksecurity.backend.security.JwtTokenProvider;
+import com.banksecurity.backend.util.Constants;
 import jakarta.annotation.Nullable;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,9 +17,6 @@ import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBr
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
-/**
- * Configuration WebSocket pour la communication en temps réel
- */
 @Slf4j
 @Configuration
 @EnableWebSocketMessageBroker
@@ -27,93 +25,72 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final JwtTokenProvider jwtTokenProvider;
 
-    /**
-     * Configure les endpoints STOMP pour la communication WebSocket
-     */
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        // Préfixe pour les messages envoyés au client
         registry.enableSimpleBroker(
-                "/topic",    // Diffusion générale (tous les clients)
-                "/queue"     // Messages spécifiques à un utilisateur
+                "/topic",
+                "/queue"
         );
-
-        // Préfixe pour les messages envoyés par le client au serveur
         registry.setApplicationDestinationPrefixes("/app");
-
-        // Configuration du broker pour les messages utilisateur
         registry.setUserDestinationPrefix("/user");
     }
 
-    /**
-     * Enregistre les endpoints STOMP
-     */
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/ws")
+        // ✅ Utilisation de Constants.WS_ENDPOINT
+        registry.addEndpoint(Constants.WS_ENDPOINT)
                 .setAllowedOrigins(
                         "http://localhost:3000",
                         "http://localhost:5173",
                         "http://192.168.1.100:3000"
                 )
-                .withSockJS(); // Fallback SockJS pour les navigateurs sans WebSocket
+                .withSockJS();
 
-        registry.addEndpoint("/ws")
+        registry.addEndpoint(Constants.WS_ENDPOINT)
                 .setAllowedOrigins(
                         "http://localhost:3000",
                         "http://localhost:5173",
                         "http://192.168.1.100:3000"
                 );
 
-        log.info("Endpoints WebSocket enregistrés sur /ws");
+        log.info("Endpoints WebSocket enregistrés sur {}", Constants.WS_ENDPOINT);
     }
 
-    /**
-     * Configure le canal de messages entrant
-     */
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
         registration.interceptors(new WebSocketAuthInterceptor());
     }
 
-    /**
-     * Configure le canal de messages sortant
-     */
     @Override
     public void configureClientOutboundChannel(ChannelRegistration registration) {
         // Configuration supplémentaire si nécessaire
     }
 
-    /**
-     * Intercepteur d'authentification pour les connexions WebSocket
-     */
     private class WebSocketAuthInterceptor implements ChannelInterceptor {
 
         @Override
         public Message<?> preSend(@Nullable Message<?> message, @Nullable MessageChannel channel) {
-            // Vérifier que les paramètres ne sont pas null
             if (message == null || channel == null) {
                 log.warn("Message ou canal WebSocket null");
                 return null;
             }
 
-            // Récupérer les headers du message
             StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
             StompCommand command = accessor.getCommand();
 
-            // Vérifier l'authentification pour les commandes CONNECT
             if (StompCommand.CONNECT.equals(command)) {
-                String authToken = accessor.getFirstNativeHeader("Authorization");
+                // ✅ Utilisation de Constants.JWT_HEADER
+                String authToken = accessor.getFirstNativeHeader(Constants.JWT_HEADER);
 
                 if (authToken == null || authToken.isEmpty()) {
                     log.warn("Tentative de connexion WebSocket sans token");
-                    throw new IllegalArgumentException(
-                            "Authentification requise pour la connexion WebSocket"
-                    );
+                    throw new IllegalArgumentException("Authentification requise pour la connexion WebSocket");
                 }
 
-                // Valider le token JWT
-                String token = authToken.startsWith("Bearer ") ? authToken.substring(7) : authToken;
+                // ✅ Utilisation de Constants.JWT_PREFIX
+                String token = authToken.startsWith(Constants.JWT_PREFIX)
+                        ? authToken.substring(Constants.JWT_PREFIX.length())
+                        : authToken;
 
                 if (!jwtTokenProvider.validateToken(token)) {
                     log.warn("Token JWT invalide pour la connexion WebSocket");

@@ -4,6 +4,7 @@ import com.banksecurity.backend.model.AuditLog;
 import com.banksecurity.backend.repository.AuditLogRepository;
 import com.banksecurity.backend.service.AuditLogService;
 import com.banksecurity.backend.util.AsyncUtils;
+import com.banksecurity.backend.util.Constants;
 import com.banksecurity.backend.util.DateUtils;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
@@ -39,7 +40,6 @@ public class AuditLogServiceImpl implements AuditLogService {
     @Override
     @Transactional
     public void logAction(UUID userId, String action, String details) {
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
         CompletableFuture<Void> future = AsyncUtils.runAsync(
                 () -> {
                     AuditLog auditLog = AuditLog.builder()
@@ -63,7 +63,6 @@ public class AuditLogServiceImpl implements AuditLogService {
     @Override
     @Transactional
     public void logAction(UUID userId, String action, String details, String ipAddress, String userAgent) {
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
         CompletableFuture<Void> future = AsyncUtils.runAsync(
                 () -> {
                     AuditLog auditLog = AuditLog.builder()
@@ -89,7 +88,6 @@ public class AuditLogServiceImpl implements AuditLogService {
     @Override
     @Transactional
     public void logEntityAction(UUID userId, String action, String entityType, UUID entityId, String details) {
-        // ✅ Utilisation de AsyncUtils.runAsync(Runnable)
         CompletableFuture<Void> future = AsyncUtils.runAsync(
                 () -> {
                     AuditLog auditLog = AuditLog.builder()
@@ -134,7 +132,7 @@ public class AuditLogServiceImpl implements AuditLogService {
 
     @Override
     public List<AuditLog> getRecentLogs(int limit) {
-        Pageable pageable = PageRequest.of(0, limit, Sort.by("createdAt").descending());
+        Pageable pageable = PageRequest.of(0, limit, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
         return auditLogRepository.findRecentLogs(pageable);
     }
 
@@ -162,7 +160,7 @@ public class AuditLogServiceImpl implements AuditLogService {
     }
 
     public Page<AuditLog> getLogsByUserPaginated(UUID userId, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
         return auditLogRepository.findByUserId(userId, pageable);
     }
 
@@ -195,13 +193,12 @@ public class AuditLogServiceImpl implements AuditLogService {
             int page,
             int size) {
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Constants.DEFAULT_SORT_FIELD).descending());
         return auditLogRepository.findLogsWithFilters(userId, action, startDate, endDate, pageable);
     }
 
     public Map<String, Long> getTopActions(int limit) {
-        LocalDateTime since = DateUtils.daysAgo(30);
+        LocalDateTime since = DateUtils.daysAgo(Constants.DEFAULT_ALERT_RETENTION_DAYS);
         return countActionsSince(since).entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(limit)
