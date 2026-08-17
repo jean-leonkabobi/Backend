@@ -7,6 +7,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -21,36 +22,36 @@ public class WebSocketHandler extends TextWebSocketHandler {
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
 
     @Override
-    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+    public void afterConnectionEstablished(WebSocketSession session) {
         String sessionId = session.getId();
         sessions.put(sessionId, session);
-        log.info("Connexion WebSocket établie: {}", sessionId);
-        log.debug("Nombre de sessions actives: {}", sessions.size());
+        log.info("[WS-CONNECT] Connexion établie: {}", sessionId);
+        log.debug("[WS-CONNECT] Nombre de sessions: {}", sessions.size());
     }
 
     @Override
-    protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
+    protected void handleTextMessage(WebSocketSession session, TextMessage message) throws IOException {
         String payload = message.getPayload();
-        log.debug("Message reçu de {}: {}", session.getId(), payload);
+        log.debug("[WS-MESSAGE] Message reçu de {}: {}", session.getId(), payload);
 
-        // Répondre avec un accusé de réception
+        // ✅ Pas de try-with-resources - WebSocketSession n'est pas AutoCloseable
         session.sendMessage(new TextMessage("{\"status\":\"received\"}"));
     }
 
     @Override
-    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         String sessionId = session.getId();
         sessions.remove(sessionId);
-        log.info("Connexion WebSocket fermée: {} (statut: {})", sessionId, status);
-        log.debug("Nombre de sessions actives: {}", sessions.size());
+        log.info("[WS-CLOSE] Connexion fermée: {} (statut: {})", sessionId, status);
+        log.debug("[WS-CLOSE] Nombre de sessions: {}", sessions.size());
     }
 
     @Override
-    public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+    public void handleTransportError(WebSocketSession session, Throwable exception) throws IOException {
         String sessionId = session.getId();
-        log.error("Erreur de transport WebSocket pour {}: {}", sessionId, exception.getMessage());
+        log.error("[WS-ERROR] Erreur de transport pour {}: {}", sessionId, exception.getMessage());
 
-        // Fermer la session en cas d'erreur
+        // ✅ Pas de try-with-resources
         if (session.isOpen()) {
             session.close(CloseStatus.SERVER_ERROR);
         }
@@ -59,32 +60,40 @@ public class WebSocketHandler extends TextWebSocketHandler {
 
     /**
      * Envoie un message à une session spécifique
+     * Utilisé par WebSocketServiceImpl via sendAlertToUser
      */
     public void sendMessageToSession(String sessionId, String message) {
         WebSocketSession session = sessions.get(sessionId);
         if (session != null && session.isOpen()) {
             try {
+                // ✅ Pas de try-with-resources
                 session.sendMessage(new TextMessage(message));
-            } catch (Exception e) {
-                log.error("Erreur lors de l'envoi du message à {}: {}", sessionId, e.getMessage());
+                log.debug("[WS-SEND-ONE] Message envoyé à: {}", sessionId);
+            } catch (IOException e) {
+                log.error("[WS-SEND-ERROR] Erreur d'envoi à {}: {}", sessionId, e.getMessage());
             }
+        } else {
+            log.warn("[WS-SEND-WARN] Session non trouvée: {}", sessionId);
         }
     }
 
     /**
      * Envoie un message à toutes les sessions
+     * Utilisé par WebSocketServiceImpl via broadcastAlert
      */
     public void broadcastMessage(String message) {
         sessions.values().forEach(session -> {
             if (session.isOpen()) {
                 try {
+                    // ✅ Pas de try-with-resources
                     session.sendMessage(new TextMessage(message));
-                } catch (Exception e) {
-                    log.error("Erreur lors de la diffusion du message à {}: {}",
+                } catch (IOException e) {
+                    log.error("[WS-BROADCAST-ERROR] Erreur de diffusion à {}: {}",
                             session.getId(), e.getMessage());
                 }
             }
         });
+        log.debug("[WS-BROADCAST] Message diffusé à {} sessions", sessions.size());
     }
 
     /**

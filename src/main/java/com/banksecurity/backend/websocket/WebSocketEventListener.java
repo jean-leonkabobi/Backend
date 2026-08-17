@@ -30,6 +30,8 @@ public class WebSocketEventListener {
 
         if (sessionId != null) {
             log.info("Nouvelle connexion WebSocket: {}", sessionId);
+            // ✅ Utilisation de webSocketHandler pour le suivi des sessions
+            log.debug("Sessions actives après connexion: {}", webSocketHandler.getActiveSessionsCount());
         }
     }
 
@@ -43,6 +45,8 @@ public class WebSocketEventListener {
 
         if (sessionId != null) {
             log.info("Déconnexion WebSocket: {}", sessionId);
+            // ✅ Utilisation de webSocketHandler pour le suivi des sessions
+            log.debug("Sessions actives après déconnexion: {}", webSocketHandler.getActiveSessionsCount());
         }
     }
 }
