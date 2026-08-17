@@ -48,28 +48,24 @@ public final class ImageUtils {
         int originalWidth = originalImage.getWidth();
         int originalHeight = originalImage.getHeight();
 
-        // Calculer les nouvelles dimensions en préservant le ratio
         double ratio = Math.min(
                 (double) maxWidth / originalWidth,
                 (double) maxHeight / originalHeight
         );
 
         if (ratio >= 1.0) {
-            // L'image est déjà plus petite que les dimensions max
             return imageData;
         }
 
         int newWidth = (int) (originalWidth * ratio);
         int newHeight = (int) (originalHeight * ratio);
 
-        // Redimensionner
         Image resizedImage = originalImage.getScaledInstance(newWidth, newHeight, Image.SCALE_SMOOTH);
         BufferedImage bufferedResized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
         Graphics2D g2d = bufferedResized.createGraphics();
         g2d.drawImage(resizedImage, 0, 0, null);
         g2d.dispose();
 
-        // Convertir en bytes
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(bufferedResized, "jpg", baos);
 
@@ -91,11 +87,9 @@ public final class ImageUtils {
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
                 RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        // Configuration du texte
         g2d.setFont(new Font("Arial", Font.BOLD, 20));
-        g2d.setColor(new Color(255, 255, 255, 128)); // Blanc semi-transparent
+        g2d.setColor(new Color(255, 255, 255, 128));
 
-        // Position du filigrane (en bas à droite)
         int x = originalImage.getWidth() - 200;
         int y = originalImage.getHeight() - 20;
         g2d.drawString(watermarkText, x, y);

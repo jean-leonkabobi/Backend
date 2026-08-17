@@ -3,6 +3,7 @@ package com.banksecurity.backend.service.impl;
 import com.banksecurity.backend.dto.request.LoginRequest;
 import com.banksecurity.backend.dto.request.RegisterRequest;
 import com.banksecurity.backend.dto.response.AuthResponse;
+import com.banksecurity.backend.exception.BadRequestException;
 import com.banksecurity.backend.exception.ConflictException;
 import com.banksecurity.backend.exception.ForbiddenException;
 import com.banksecurity.backend.exception.ResourceNotFoundException;
@@ -16,6 +17,7 @@ import com.banksecurity.backend.service.AuthService;
 import com.banksecurity.backend.service.AuditLogService;
 import com.banksecurity.backend.util.Constants;
 import com.banksecurity.backend.util.DateUtils;
+import com.banksecurity.backend.util.ValidationUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -43,9 +45,22 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public AuthResponse login(LoginRequest loginRequest) {
         try {
+            // ✅ Utilisation de ValidationUtils.isNullOrEmpty
+            if (ValidationUtils.isNullOrEmpty(loginRequest.getEmail())) {
+                throw new BadRequestException("L'email est obligatoire");
+            }
+
+            // ✅ Utilisation de ValidationUtils.isInvalidEmail (méthode négative - pas d'inversion)
+            if (ValidationUtils.isInvalidEmail(loginRequest.getEmail())) {
+                throw new BadRequestException("Format d'email invalide: " + loginRequest.getEmail());
+            }
+
+            // ✅ Utilisation de ValidationUtils.sanitizeString
+            String cleanedEmail = ValidationUtils.sanitizeString(loginRequest.getEmail());
+
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
-                            loginRequest.getEmail(),
+                            cleanedEmail,
                             loginRequest.getPassword()
                     )
             );
@@ -69,7 +84,6 @@ public class AuthServiceImpl implements AuthService {
             user.setFailedAttempts(0);
             userRepository.save(user);
 
-            // ✅ Utilisation de DateUtils.toDate
             log.debug("Date de dernière connexion (Date): {}", DateUtils.toDate(user.getLastLogin()));
 
             auditLogService.logAction(user.getId(), Constants.AUDIT_ACTION_LOGIN, "Connexion réussie");
@@ -90,6 +104,8 @@ public class AuthServiceImpl implements AuthService {
 
         } catch (UnauthorizedException e) {
             throw e;
+        } catch (BadRequestException e) {
+            throw e;
         } catch (Exception e) {
             userRepository.findByEmail(loginRequest.getEmail()).ifPresent(user -> {
                 user.setFailedAttempts(user.getFailedAttempts() + 1);
@@ -109,15 +125,35 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public AuthResponse register(RegisterRequest registerRequest) {
         try {
-            if (userRepository.existsByEmail(registerRequest.getEmail())) {
-                throw new ConflictException("Cet email est déjà utilisé: " + registerRequest.getEmail());
+            // ✅ Utilisation de ValidationUtils.isNullOrEmpty
+            if (ValidationUtils.isNullOrEmpty(registerRequest.getEmail())) {
+                throw new BadRequestException("L'email est obligatoire");
+            }
+
+            // ✅ Utilisation de ValidationUtils.isInvalidEmail (méthode négative - pas d'inversion)
+            if (ValidationUtils.isInvalidEmail(registerRequest.getEmail())) {
+                throw new BadRequestException("Format d'email invalide: " + registerRequest.getEmail());
+            }
+
+            // ✅ Utilisation de ValidationUtils.isWeakPassword (méthode négative - pas d'inversion)
+            if (ValidationUtils.isWeakPassword(registerRequest.getPassword())) {
+                throw new BadRequestException("Mot de passe trop faible (min 8 caractères, majuscule, minuscule, chiffre, caractère spécial)");
+            }
+
+            // ✅ Utilisation de ValidationUtils.sanitizeString
+            String cleanedEmail = ValidationUtils.sanitizeString(registerRequest.getEmail());
+            String cleanedFirstName = ValidationUtils.sanitizeString(registerRequest.getFirstName());
+            String cleanedLastName = ValidationUtils.sanitizeString(registerRequest.getLastName());
+
+            if (userRepository.existsByEmail(cleanedEmail)) {
+                throw new ConflictException("Cet email est déjà utilisé: " + cleanedEmail);
             }
 
             User user = User.builder()
-                    .email(registerRequest.getEmail())
+                    .email(cleanedEmail)
                     .passwordHash(passwordEncoder.encode(registerRequest.getPassword()))
-                    .firstName(registerRequest.getFirstName())
-                    .lastName(registerRequest.getLastName())
+                    .firstName(cleanedFirstName)
+                    .lastName(cleanedLastName)
                     .role(registerRequest.getRole() != null ? registerRequest.getRole() : UserRole.SECURITY)
                     .phoneNumber(registerRequest.getPhoneNumber())
                     .isActive(true)
@@ -148,6 +184,8 @@ public class AuthServiceImpl implements AuthService {
                     .build();
 
         } catch (ConflictException e) {
+            throw e;
+        } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
             log.error("Erreur lors de l'enregistrement de {}: {}", registerRequest.getEmail(), e.getMessage(), e);

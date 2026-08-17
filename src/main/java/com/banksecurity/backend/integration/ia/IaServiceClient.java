@@ -2,6 +2,7 @@ package com.banksecurity.backend.integration.ia;
 
 import com.banksecurity.backend.exception.BadRequestException;
 import com.banksecurity.backend.util.Constants;
+import com.banksecurity.backend.util.ImageUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -13,7 +14,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -40,10 +40,12 @@ public class IaServiceClient {
         String url = iaServiceUrl + "/detect";
 
         try {
+            // ✅ Utilisation de ImageUtils.encodeToBase64
+            String base64Image = ImageUtils.encodeToBase64(imageData);
+
             IaDetectionRequest request = IaDetectionRequest.builder()
-                    .imageBase64(Base64.getEncoder().encodeToString(imageData))
+                    .imageBase64(base64Image)
                     .classesOfInterest(classesOfInterest)
-                    // ✅ Utilisation de Constants.DEFAULT_CONFIDENCE_THRESHOLD
                     .confidenceThreshold(Constants.DEFAULT_CONFIDENCE_THRESHOLD)
                     .build();
 
@@ -62,7 +64,6 @@ public class IaServiceClient {
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
                 IaDetectionResponse detectionResponse = response.getBody();
 
-                // ✅ Utilisation de Constants.HIGH_CONFIDENCE_THRESHOLD
                 if (detectionResponse.getDetections() != null) {
                     long highConfidenceCount = detectionResponse.getDetections().stream()
                             .filter(d -> d.getConfidence() != null && d.getConfidence() >= Constants.HIGH_CONFIDENCE_THRESHOLD)
@@ -91,6 +92,19 @@ public class IaServiceClient {
     }
 
     /**
+     * Décode une image depuis base64
+     * ✅ Utilisation de ImageUtils.decodeFromBase64
+     */
+    public byte[] decodeImageFromBase64(String base64Image) {
+        try {
+            return ImageUtils.decodeFromBase64(base64Image);
+        } catch (Exception e) {
+            log.error("Erreur lors du décodage de l'image base64", e);
+            throw new BadRequestException("Image base64 invalide: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Vérifie si le service IA est disponible
      */
     public boolean isServiceAvailable() {
@@ -115,9 +129,7 @@ public class IaServiceClient {
             Map<String, String> request = Map.of(
                     "camera_id", cameraId,
                     "rtsp_url", rtspUrl,
-                    // ✅ Utilisation de Constants.DEFAULT_DETECTION_INTERVAL
                     "detection_interval", String.valueOf(Constants.DEFAULT_DETECTION_INTERVAL),
-                    // ✅ Utilisation de Constants.MAX_DETECTION_BATCH_SIZE
                     "batch_size", String.valueOf(Constants.MAX_DETECTION_BATCH_SIZE)
             );
 

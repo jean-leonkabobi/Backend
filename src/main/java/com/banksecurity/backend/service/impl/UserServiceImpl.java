@@ -12,6 +12,7 @@ import com.banksecurity.backend.repository.UserRepository;
 import com.banksecurity.backend.security.UserPrincipal;
 import com.banksecurity.backend.service.AuditLogService;
 import com.banksecurity.backend.service.UserService;
+import com.banksecurity.backend.util.ValidationUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
@@ -22,7 +23,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -41,19 +41,41 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public UserResponse createUser(UserRequest request) {
         try {
-            if (userRepository.existsByEmail(request.getEmail())) {
-                throw new ConflictException("Cet email est déjà utilisé: " + request.getEmail());
+            // ✅ ValidationUtils.isNullOrEmpty
+            if (ValidationUtils.isNullOrEmpty(request.getEmail())) {
+                throw new BadRequestException("L'email est obligatoire");
             }
 
-            if (request.getPassword() == null || request.getPassword().isEmpty()) {
-                throw new BadRequestException("Le mot de passe est obligatoire");
+            // ✅ ValidationUtils.isInvalidEmail (méthode négative)
+            if (ValidationUtils.isInvalidEmail(request.getEmail())) {
+                throw new BadRequestException("Format d'email invalide: " + request.getEmail());
+            }
+
+            // ✅ ValidationUtils.isWeakPassword (méthode négative)
+            if (ValidationUtils.isWeakPassword(request.getPassword())) {
+                throw new BadRequestException("Mot de passe trop faible (min 8 caractères, majuscule, minuscule, chiffre, caractère spécial)");
+            }
+
+            // ✅ ValidationUtils.isInvalidPhone (méthode négative)
+            if (request.getPhoneNumber() != null && !request.getPhoneNumber().isEmpty() &&
+                    ValidationUtils.isInvalidPhone(request.getPhoneNumber())) {
+                throw new BadRequestException("Format de téléphone invalide: " + request.getPhoneNumber());
+            }
+
+            // ✅ ValidationUtils.sanitizeString
+            String cleanedEmail = ValidationUtils.sanitizeString(request.getEmail());
+            String cleanedFirstName = ValidationUtils.sanitizeString(request.getFirstName());
+            String cleanedLastName = ValidationUtils.sanitizeString(request.getLastName());
+
+            if (userRepository.existsByEmail(cleanedEmail)) {
+                throw new ConflictException("Cet email est déjà utilisé: " + cleanedEmail);
             }
 
             User user = User.builder()
-                    .email(request.getEmail())
+                    .email(cleanedEmail)
                     .passwordHash(passwordEncoder.encode(request.getPassword()))
-                    .firstName(request.getFirstName())
-                    .lastName(request.getLastName())
+                    .firstName(cleanedFirstName)
+                    .lastName(cleanedLastName)
                     .role(request.getRole() != null ? request.getRole() : UserRole.SECURITY)
                     .phoneNumber(request.getPhoneNumber())
                     .isActive(request.getIsActive() != null ? request.getIsActive() : true)
@@ -70,6 +92,8 @@ public class UserServiceImpl implements UserService {
 
         } catch (ConflictException e) {
             throw e;
+        } catch (BadRequestException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Erreur lors de la création de l'utilisateur: {}", e.getMessage(), e);
             throw new ConflictException("Erreur lors de la création de l'utilisateur: " + request.getEmail(), e);
@@ -83,20 +107,34 @@ public class UserServiceImpl implements UserService {
             User user = userRepository.findById(id)
                     .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", id));
 
-            if (!user.getEmail().equals(request.getEmail()) &&
-                    userRepository.existsByEmail(request.getEmail())) {
-                throw new ConflictException("Cet email est déjà utilisé: " + request.getEmail());
+            // ✅ ValidationUtils.isInvalidEmail (méthode négative)
+            if (ValidationUtils.isInvalidEmail(request.getEmail())) {
+                throw new BadRequestException("Format d'email invalide: " + request.getEmail());
             }
 
-            user.setEmail(request.getEmail());
-            user.setFirstName(request.getFirstName());
-            user.setLastName(request.getLastName());
+            // ✅ ValidationUtils.sanitizeString
+            String cleanedEmail = ValidationUtils.sanitizeString(request.getEmail());
+            String cleanedFirstName = ValidationUtils.sanitizeString(request.getFirstName());
+            String cleanedLastName = ValidationUtils.sanitizeString(request.getLastName());
+
+            if (!user.getEmail().equals(cleanedEmail) &&
+                    userRepository.existsByEmail(cleanedEmail)) {
+                throw new ConflictException("Cet email est déjà utilisé: " + cleanedEmail);
+            }
+
+            user.setEmail(cleanedEmail);
+            user.setFirstName(cleanedFirstName);
+            user.setLastName(cleanedLastName);
 
             if (request.getRole() != null) {
                 user.setRole(request.getRole());
             }
 
             if (request.getPhoneNumber() != null) {
+                // ✅ ValidationUtils.isInvalidPhone (méthode négative)
+                if (ValidationUtils.isInvalidPhone(request.getPhoneNumber())) {
+                    throw new BadRequestException("Format de téléphone invalide: " + request.getPhoneNumber());
+                }
                 user.setPhoneNumber(request.getPhoneNumber());
             }
 
@@ -105,6 +143,10 @@ public class UserServiceImpl implements UserService {
             }
 
             if (request.getPassword() != null && !request.getPassword().isEmpty()) {
+                // ✅ ValidationUtils.isWeakPassword (méthode négative)
+                if (ValidationUtils.isWeakPassword(request.getPassword())) {
+                    throw new BadRequestException("Mot de passe trop faible");
+                }
                 user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
             }
 
@@ -118,6 +160,8 @@ public class UserServiceImpl implements UserService {
         } catch (ConflictException e) {
             throw e;
         } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
             log.error("Erreur lors de la mise à jour de l'utilisateur: {}", e.getMessage(), e);
@@ -208,6 +252,11 @@ public class UserServiceImpl implements UserService {
         }
 
         try {
+            // ✅ ValidationUtils.isWeakPassword (méthode négative)
+            if (ValidationUtils.isWeakPassword(newPassword)) {
+                throw new BadRequestException("Mot de passe trop faible (min 8 caractères, majuscule, minuscule, chiffre, caractère spécial)");
+            }
+
             User user = userRepository.findById(id)
                     .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "id", id));
 
@@ -220,6 +269,8 @@ public class UserServiceImpl implements UserService {
             log.info("Mot de passe réinitialisé pour: {}", user.getEmail());
         } catch (ResourceNotFoundException e) {
             throw e;
+        } catch (BadRequestException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Erreur lors de la réinitialisation du mot de passe: {}", e.getMessage(), e);
             throw new ResourceNotFoundException("Erreur lors de la réinitialisation du mot de passe: " + id, e);
@@ -228,7 +279,9 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public List<UserResponse> searchUsers(String searchTerm) {
-        return userRepository.searchUsers(searchTerm).stream()
+        // ✅ ValidationUtils.sanitizeString
+        String cleanedTerm = ValidationUtils.sanitizeString(searchTerm);
+        return userRepository.searchUsers(cleanedTerm).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
@@ -268,36 +321,24 @@ public class UserServiceImpl implements UserService {
 
     // ==================== NOUVELLES MÉTHODES UTILISANT LES REPOSITORY ====================
 
-    /**
-     * Récupère les utilisateurs actifs
-     */
     public List<UserResponse> getActiveUsers() {
         return userRepository.findByIsActiveTrue().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère les utilisateurs inactifs
-     */
     public List<UserResponse> getInactiveUsers() {
         return userRepository.findByIsActiveFalse().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère les comptes verrouillés
-     */
     public List<UserResponse> getLockedAccounts() {
         return userRepository.findByAccountLockedTrue().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère les utilisateurs qui ne se sont pas connectés depuis X jours
-     */
     public List<UserResponse> getInactiveUsersSince(int days) {
         LocalDateTime date = LocalDateTime.now().minusDays(days);
         return userRepository.findInactiveUsers(date).stream()
@@ -305,66 +346,42 @@ public class UserServiceImpl implements UserService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère un utilisateur par son token de réinitialisation
-     */
     public UserResponse getUserByPasswordResetToken(String token) {
         User user = userRepository.findByPasswordResetToken(token)
                 .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "passwordResetToken", token));
         return mapToResponse(user);
     }
 
-    /**
-     * Récupère les utilisateurs avec des tentatives de connexion échouées
-     */
     public List<UserResponse> getUsersWithFailedAttempts(int attempts) {
         return userRepository.findUsersWithFailedAttempts(attempts).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Récupère tous les utilisateurs triés par date de création
-     */
     public List<UserResponse> getAllUsersOrderedByCreation() {
         return userRepository.findAllOrderByCreatedAtDesc().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Vérifie si un email existe
-     */
     public boolean emailExists(String email) {
         return userRepository.existsByEmail(email);
     }
 
-    /**
-     * Récupère un utilisateur par email
-     */
     public UserResponse getUserByEmail(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("Utilisateur", "email", email));
         return mapToResponse(user);
     }
 
-    /**
-     * Compte les utilisateurs actifs
-     */
     public long countActiveUsers() {
         return userRepository.findByIsActiveTrue().size();
     }
 
-    /**
-     * Compte les utilisateurs inactifs
-     */
     public long countInactiveUsers() {
         return userRepository.findByIsActiveFalse().size();
     }
 
-    /**
-     * Compte les comptes verrouillés
-     */
     public long countLockedAccounts() {
         return userRepository.findByAccountLockedTrue().size();
     }

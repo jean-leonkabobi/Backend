@@ -49,6 +49,11 @@ public class ZoneServiceImpl implements ZoneService {
                 throw new BadRequestException("Points du polygone invalides. Format attendu: [[x1,y1],[x2,y2],...]");
             }
 
+            // ✅ ValidationUtils.isInvalidSensitivity (méthode négative)
+            if (request.getSensitivity() != null && ValidationUtils.isInvalidSensitivity(request.getSensitivity())) {
+                throw new BadRequestException("La sensibilité doit être entre 0 et 100");
+            }
+
             if (zoneRepository.existsByCameraIdAndName(request.getCameraId(), request.getName())) {
                 throw new ConflictException("Une zone avec ce nom existe déjà pour cette caméra: " + request.getName());
             }
@@ -59,14 +64,12 @@ public class ZoneServiceImpl implements ZoneService {
                     .points(request.getPoints())
                     .type(request.getType())
                     .description(request.getDescription())
-                    // ✅ Utilisation de Constants.DEFAULT_ZONE_SENSITIVITY
                     .sensitivity(request.getSensitivity() != null ? request.getSensitivity() : Constants.DEFAULT_ZONE_SENSITIVITY)
                     .isActive(true)
                     .build();
 
             zone = zoneRepository.save(zone);
 
-            // ✅ Utilisation de Constants.AUDIT_ACTION_CREATE
             auditLogService.logAction(null, Constants.AUDIT_ACTION_CREATE + "_ZONE",
                     "Création zone: " + zone.getName() + " pour caméra: " + camera.getName());
             log.info("Zone créée: {}", zone.getName());
@@ -76,6 +79,8 @@ public class ZoneServiceImpl implements ZoneService {
         } catch (ConflictException e) {
             throw e;
         } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
             log.error("Erreur lors de la création de la zone: {}", e.getMessage(), e);
@@ -107,7 +112,8 @@ public class ZoneServiceImpl implements ZoneService {
             zone.setDescription(request.getDescription());
 
             if (request.getSensitivity() != null) {
-                if (!ValidationUtils.isValidSensitivity(request.getSensitivity())) {
+                // ✅ ValidationUtils.isInvalidSensitivity (méthode négative)
+                if (ValidationUtils.isInvalidSensitivity(request.getSensitivity())) {
                     throw new BadRequestException("La sensibilité doit être entre 0 et 100");
                 }
                 zone.setSensitivity(request.getSensitivity());
@@ -115,7 +121,6 @@ public class ZoneServiceImpl implements ZoneService {
 
             zone = zoneRepository.save(zone);
 
-            // ✅ Utilisation de Constants.AUDIT_ACTION_UPDATE
             auditLogService.logAction(null, Constants.AUDIT_ACTION_UPDATE + "_ZONE", "Mise à jour zone: " + zone.getName());
 
             return mapToResponse(zone);
@@ -123,6 +128,8 @@ public class ZoneServiceImpl implements ZoneService {
         } catch (ConflictException e) {
             throw e;
         } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
             log.error("Erreur lors de la mise à jour de la zone: {}", e.getMessage(), e);
@@ -144,7 +151,6 @@ public class ZoneServiceImpl implements ZoneService {
 
             zoneRepository.delete(zone);
 
-            // ✅ Utilisation de Constants.AUDIT_ACTION_DELETE
             auditLogService.logAction(null, Constants.AUDIT_ACTION_DELETE + "_ZONE", "Suppression zone: " + zone.getName());
             log.info("Zone supprimée: {}", zone.getName());
         } catch (ResourceNotFoundException e) {
@@ -314,7 +320,6 @@ public class ZoneServiceImpl implements ZoneService {
     private double[][] parsePoints(String pointsJson) {
         try {
             String[] pointStrings = pointsJson.replaceAll("[\\[\\]]", "").split(",");
-            // ✅ Utilisation de Constants.MAX_ZONE_POINTS et MIN_ZONE_POINTS
             if (pointStrings.length / 2 > Constants.MAX_ZONE_POINTS) {
                 throw new BadRequestException("Trop de points dans le polygone (max: " + Constants.MAX_ZONE_POINTS + ")");
             }

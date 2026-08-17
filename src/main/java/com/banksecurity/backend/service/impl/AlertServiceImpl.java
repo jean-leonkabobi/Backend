@@ -22,6 +22,8 @@ import com.banksecurity.backend.service.WebSocketService;
 import com.banksecurity.backend.util.AsyncUtils;
 import com.banksecurity.backend.util.Constants;
 import com.banksecurity.backend.util.DateUtils;
+import com.banksecurity.backend.util.FileUtils;
+import com.banksecurity.backend.util.ImageUtils;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +34,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.awt.Dimension;
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -120,7 +124,6 @@ public class AlertServiceImpl implements AlertService {
             });
         }
 
-        // ✅ Utilisation de DateUtils.formatTime
         log.info("Alerte créée à {}: {} - {}", DateUtils.formatTime(LocalDateTime.now()), alert.getType(), alert.getSeverity());
 
         return response;
@@ -138,7 +141,6 @@ public class AlertServiceImpl implements AlertService {
                 log.warn("Alerte {} traitée après le délai de traitement (timeout: {} ms)", id, Constants.ALERT_PROCESSING_TIMEOUT);
             }
 
-            // ✅ Utilisation de DateUtils.humanReadableDuration
             if (alert.getCreatedAt() != null) {
                 String duration = DateUtils.humanReadableDuration(alert.getCreatedAt(), LocalDateTime.now());
                 log.debug("Alerte {} traitée en {}", id, duration);
@@ -221,11 +223,9 @@ public class AlertServiceImpl implements AlertService {
             throw new BadRequestException("Les dates ne peuvent pas être dans le futur");
         }
 
-        // ✅ Utilisation de DateUtils.startOfDay et endOfDay
         LocalDateTime startNormalized = DateUtils.startOfDay(start);
         LocalDateTime endNormalized = DateUtils.endOfDay(end);
 
-        // ✅ Utilisation de DateUtils.daysBetween
         long daysBetween = DateUtils.daysBetween(startNormalized, endNormalized);
         log.debug("Période de recherche: {} jours", daysBetween);
 
@@ -251,7 +251,6 @@ public class AlertServiceImpl implements AlertService {
             alert.setStatus(AlertStatus.ESCALATED);
             alert = alertRepository.save(alert);
 
-            // ✅ Utilisation de DateUtils.format
             auditLogService.logAction(null, "ALERT_ESCALATED",
                     "Alerte escaladée le " + DateUtils.format(LocalDateTime.now()) + ": " + id);
 
@@ -280,7 +279,6 @@ public class AlertServiceImpl implements AlertService {
             alert.setResolutionNotes(notes);
             alert = alertRepository.save(alert);
 
-            // ✅ Utilisation de DateUtils.format
             auditLogService.logAction(null, Constants.AUDIT_ACTION_ALERT_RESOLVED,
                     "Alerte résolue le " + DateUtils.format(LocalDateTime.now()) + ": " + id + " -> " + resolutionStatus);
 
@@ -317,13 +315,36 @@ public class AlertServiceImpl implements AlertService {
             Alert alert = alertRepository.findById(alertId)
                     .orElseThrow(() -> new ResourceNotFoundException("Alerte", "id", alertId));
 
-            String imagePath = "/storage/images/alerts/" + alertId + ".jpg";
+            // ✅ Utilisation de ImageUtils.isValidImage
+            if (!ImageUtils.isValidImage(imageData)) {
+                throw new BadRequestException("Les données ne sont pas une image valide");
+            }
+
+            // ✅ Utilisation de ImageUtils.getImageDimensions
+            Dimension dimensions = ImageUtils.getImageDimensions(imageData);
+            log.debug("Image originale: {}x{} pixels", dimensions.width, dimensions.height);
+
+            // ✅ Utilisation de ImageUtils.resizeImage (max 800x600 pour les alertes)
+            byte[] resizedImage = ImageUtils.resizeImage(imageData, 800, 600);
+            log.debug("Image redimensionnée de {} à {} bytes", imageData.length, resizedImage.length);
+
+            // ✅ Utilisation de ImageUtils.addWatermark
+            byte[] watermarkedImage = ImageUtils.addWatermark(resizedImage, Constants.APP_NAME);
+            log.debug("Filigrane ajouté à l'image d'alerte");
+
+            // ✅ Utilisation de FileUtils.saveBytes
+            String imagePath = FileUtils.saveBytes(watermarkedImage, "/storage/images/alerts", ".jpg");
             alert.setImagePath(imagePath);
             alertRepository.save(alert);
 
             return imagePath;
         } catch (ResourceNotFoundException e) {
             throw e;
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (IOException e) {
+            log.error("Erreur lors de la manipulation de l'image: {}", e.getMessage(), e);
+            throw new BadRequestException("Erreur lors de la manipulation de l'image", e);
         } catch (Exception e) {
             log.error("Erreur lors de la sauvegarde de l'image: {}", e.getMessage(), e);
             throw new ResourceNotFoundException("Erreur lors de la sauvegarde de l'image: " + alertId, e);
@@ -360,7 +381,6 @@ public class AlertServiceImpl implements AlertService {
 
     public List<AlertResponse> getRecentUnprocessedAlerts(int hours) {
         LocalDateTime since = DateUtils.hoursAgo(hours);
-        // ✅ Utilisation de DateUtils.isToday
         return alertRepository.findRecentUnprocessedAlerts(since).stream()
                 .filter(alert -> DateUtils.isToday(alert.getCreatedAt()))
                 .map(this::mapToResponse)
@@ -380,7 +400,6 @@ public class AlertServiceImpl implements AlertService {
             throw new BadRequestException("La date de début ne peut pas être dans le futur");
         }
 
-        // ✅ Utilisation de DateUtils.isThisWeek
         if (startDate == null) {
             startDate = DateUtils.daysAgo(7);
             log.debug("Filtre par défaut: 7 derniers jours. Cette semaine: {}", DateUtils.isThisWeek(startDate));

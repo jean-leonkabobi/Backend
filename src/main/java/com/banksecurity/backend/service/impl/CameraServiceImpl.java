@@ -41,12 +41,23 @@ public class CameraServiceImpl implements CameraService {
     @Transactional
     public CameraResponse createCamera(CameraRequest request) {
         try {
-            if (!ValidationUtils.isValidRtspUrl(request.getRtspUrl())) {
+            // ✅ ValidationUtils.isInvalidRtspUrl (méthode négative)
+            if (ValidationUtils.isInvalidRtspUrl(request.getRtspUrl())) {
                 throw new BadRequestException("URL RTSP invalide");
             }
 
             if (request.getIpAddress() != null && !ValidationUtils.isValidIpAddress(request.getIpAddress())) {
                 throw new BadRequestException("Adresse IP invalide");
+            }
+
+            // ✅ ValidationUtils.isInvalidResolution (méthode négative)
+            if (request.getResolution() != null && ValidationUtils.isInvalidResolution(request.getResolution())) {
+                throw new BadRequestException("Résolution invalide: " + request.getResolution());
+            }
+
+            // ✅ ValidationUtils.isInvalidFps (méthode négative)
+            if (request.getFps() != null && ValidationUtils.isInvalidFps(request.getFps())) {
+                throw new BadRequestException("FPS invalide (doit être entre 1 et 60): " + request.getFps());
             }
 
             if (request.getIpAddress() != null && cameraRepository.findByIpAddress(request.getIpAddress()).isPresent()) {
@@ -95,8 +106,19 @@ public class CameraServiceImpl implements CameraService {
             Camera camera = cameraRepository.findById(id)
                     .orElseThrow(() -> new ResourceNotFoundException("Caméra", "id", id));
 
-            if (!ValidationUtils.isValidRtspUrl(request.getRtspUrl())) {
+            // ✅ ValidationUtils.isInvalidRtspUrl (méthode négative)
+            if (ValidationUtils.isInvalidRtspUrl(request.getRtspUrl())) {
                 throw new BadRequestException("URL RTSP invalide");
+            }
+
+            // ✅ ValidationUtils.isInvalidResolution (méthode négative)
+            if (request.getResolution() != null && ValidationUtils.isInvalidResolution(request.getResolution())) {
+                throw new BadRequestException("Résolution invalide: " + request.getResolution());
+            }
+
+            // ✅ ValidationUtils.isInvalidFps (méthode négative)
+            if (request.getFps() != null && ValidationUtils.isInvalidFps(request.getFps())) {
+                throw new BadRequestException("FPS invalide (doit être entre 1 et 60): " + request.getFps());
             }
 
             if (request.getIpAddress() != null && !request.getIpAddress().equals(camera.getIpAddress())) {
@@ -129,6 +151,8 @@ public class CameraServiceImpl implements CameraService {
         } catch (ConflictException e) {
             throw e;
         } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
             log.error("Erreur lors de la mise à jour de la caméra: {}", e.getMessage(), e);
@@ -272,7 +296,6 @@ public class CameraServiceImpl implements CameraService {
 
     @Override
     public List<CameraResponse> checkUnresponsiveCameras() {
-        // ✅ Utilisation de DateUtils.addMinutes
         LocalDateTime timeout = DateUtils.addMinutes(LocalDateTime.now(), -1);
         log.debug("Vérification des caméras sans heartbeat depuis: {}", DateUtils.format(timeout));
         return cameraRepository.findCamerasNotResponding(timeout).stream()

@@ -43,12 +43,12 @@ public class RuleServiceImpl implements RuleService {
     @Override
     @Transactional
     public RuleResponse createRule(RuleRequest request) {
-        // ✅ Utilisation de Constants.MAX_RULE_PRIORITY
         if (request.getPriority() != null && !ValidationUtils.isValidPriority(request.getPriority())) {
             throw new BadRequestException("La priorité doit être entre 1 et " + Constants.MAX_RULE_PRIORITY);
         }
 
-        if (request.getSensitivity() != null && !ValidationUtils.isValidSensitivity(request.getSensitivity())) {
+        // ✅ ValidationUtils.isInvalidSensitivity (méthode négative)
+        if (request.getSensitivity() != null && ValidationUtils.isInvalidSensitivity(request.getSensitivity())) {
             throw new BadRequestException("La sensibilité doit être entre 0 et 100");
         }
 
@@ -58,7 +58,6 @@ public class RuleServiceImpl implements RuleService {
                 .parameters(request.getParameters())
                 .thresholdTime(request.getThresholdTime())
                 .sensitivity(request.getSensitivity() != null ? request.getSensitivity() : Constants.DEFAULT_ZONE_SENSITIVITY)
-                // ✅ Utilisation de Constants.DEFAULT_RULE_PRIORITY
                 .priority(request.getPriority() != null ? request.getPriority() : Constants.DEFAULT_RULE_PRIORITY)
                 .description(request.getDescription())
                 .isActive(true)
@@ -72,7 +71,6 @@ public class RuleServiceImpl implements RuleService {
 
         rule = ruleRepository.save(rule);
 
-        // ✅ Utilisation de Constants.AUDIT_ACTION_CREATE
         auditLogService.logAction(null, Constants.AUDIT_ACTION_CREATE + "_RULE", "Création règle: " + rule.getName());
         log.info("Règle créée: {}", rule.getName());
 
@@ -85,6 +83,11 @@ public class RuleServiceImpl implements RuleService {
         try {
             Rule rule = ruleRepository.findById(id)
                     .orElseThrow(() -> new ResourceNotFoundException("Règle", "id", id));
+
+            // ✅ ValidationUtils.isInvalidSensitivity (méthode négative)
+            if (request.getSensitivity() != null && ValidationUtils.isInvalidSensitivity(request.getSensitivity())) {
+                throw new BadRequestException("La sensibilité doit être entre 0 et 100");
+            }
 
             rule.setName(request.getName());
             rule.setType(request.getType());
@@ -110,11 +113,12 @@ public class RuleServiceImpl implements RuleService {
 
             rule = ruleRepository.save(rule);
 
-            // ✅ Utilisation de Constants.AUDIT_ACTION_UPDATE
             auditLogService.logAction(null, Constants.AUDIT_ACTION_UPDATE + "_RULE", "Mise à jour règle: " + rule.getName());
 
             return mapToResponse(rule);
         } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
             log.error("Erreur lors de la mise à jour de la règle: {}", e.getMessage(), e);
@@ -136,7 +140,6 @@ public class RuleServiceImpl implements RuleService {
 
             ruleRepository.delete(rule);
 
-            // ✅ Utilisation de Constants.AUDIT_ACTION_DELETE
             auditLogService.logAction(null, Constants.AUDIT_ACTION_DELETE + "_RULE", "Suppression règle: " + rule.getName());
             log.info("Règle supprimée: {}", rule.getName());
         } catch (ResourceNotFoundException e) {
@@ -351,7 +354,6 @@ public class RuleServiceImpl implements RuleService {
             }
         }
 
-        // ✅ Utilisation de Constants.DEFAULT_PRESENCE_THRESHOLD
         long threshold = rule.getThresholdTime() != null
                 ? rule.getThresholdTime()
                 : Constants.DEFAULT_PRESENCE_THRESHOLD;
