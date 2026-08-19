@@ -6,6 +6,7 @@ import com.banksecurity.backend.service.WebSocketService;
 import com.banksecurity.backend.util.AsyncUtils;
 import com.banksecurity.backend.util.Constants;
 import com.banksecurity.backend.websocket.WebSocketHandler;
+import com.banksecurity.backend.websocket.WebSocketMessage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,14 +36,17 @@ public class WebSocketServiceImpl implements WebSocketService {
 
     @Override
     public void broadcastAlert(AlertResponse alert) {
-        // ✅ Utilisation de WebSocketHandler.broadcastMessage pour la diffusion directe
-        String messageJson = convertToJson(alert);
+        // ✅ Utilisation de WebSocketMessage.alertCreated()
+        WebSocketMessage wsMessage = WebSocketMessage.alertCreated(convertToJson(alert));
+        String messageJson = convertToJson(wsMessage);
+
+        // Diffusion via WebSocketHandler
         webSocketHandler.broadcastMessage(messageJson);
         log.debug("Alerte diffusée via WebSocketHandler: {}", alert.getId());
 
-        // ✅ Également via SimpMessagingTemplate pour les clients STOMP
+        // Diffusion via SimpMessagingTemplate pour les clients STOMP
         CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> messagingTemplate.convertAndSend(Constants.WS_TOPIC_ALERTS, alert),
+                () -> messagingTemplate.convertAndSend(Constants.WS_TOPIC_ALERTS, wsMessage),
                 notificationExecutor,
                 "Diffusion alerte " + alert.getId()
         );
@@ -53,14 +58,22 @@ public class WebSocketServiceImpl implements WebSocketService {
 
     @Override
     public void sendAlertToUser(String username, AlertResponse alert) {
-        // ✅ Utilisation de WebSocketHandler.sendMessageToSession pour l'envoi direct
-        String messageJson = convertToJson(alert);
+        // ✅ Utilisation de WebSocketMessage avec destinataire
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.ALERT_CREATED)
+                .content(convertToJson(alert))
+                .recipient(username)
+                .timestamp(LocalDateTime.now())
+                .build();
+        String messageJson = convertToJson(wsMessage);
+
+        // Envoi direct via WebSocketHandler
         webSocketHandler.sendMessageToSession(username, messageJson);
         log.debug("Alerte envoyée via WebSocketHandler à {}: {}", username, alert.getId());
 
-        // ✅ Également via SimpMessagingTemplate pour les clients STOMP
+        // Envoi via SimpMessagingTemplate pour les clients STOMP
         CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> messagingTemplate.convertAndSendToUser(username, Constants.WS_QUEUE_USER + "/alerts", alert),
+                () -> messagingTemplate.convertAndSendToUser(username, Constants.WS_QUEUE_USER + "/alerts", wsMessage),
                 notificationExecutor,
                 "Envoi alerte à " + username
         );
@@ -72,14 +85,19 @@ public class WebSocketServiceImpl implements WebSocketService {
 
     @Override
     public void broadcastStats(DashboardStatsResponse stats) {
-        // ✅ Utilisation de WebSocketHandler.broadcastMessage pour les statistiques
-        String messageJson = convertToJson(stats);
+        // ✅ Utilisation de WebSocketMessage avec STATS_UPDATED
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.STATS_UPDATED)
+                .content(convertToJson(stats))
+                .timestamp(LocalDateTime.now())
+                .build();
+        String messageJson = convertToJson(wsMessage);
+
         webSocketHandler.broadcastMessage(messageJson);
         log.debug("Statistiques diffusées via WebSocketHandler");
 
-        // ✅ Également via SimpMessagingTemplate pour les clients STOMP
         CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> messagingTemplate.convertAndSend(Constants.WS_TOPIC_STATS, stats),
+                () -> messagingTemplate.convertAndSend(Constants.WS_TOPIC_STATS, wsMessage),
                 notificationExecutor,
                 "Diffusion statistiques"
         );
@@ -91,16 +109,20 @@ public class WebSocketServiceImpl implements WebSocketService {
 
     @Override
     public void broadcastCameraStatus(String cameraId, String status) {
-        CameraStatusMessage message = new CameraStatusMessage(cameraId, status);
+        // ✅ Utilisation de WebSocketMessage avec CAMERA_STATUS_CHANGED
+        CameraStatusMessage cameraMessage = new CameraStatusMessage(cameraId, status);
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.CAMERA_STATUS_CHANGED)
+                .content(convertToJson(cameraMessage))
+                .timestamp(LocalDateTime.now())
+                .build();
+        String messageJson = convertToJson(wsMessage);
 
-        // ✅ Utilisation de WebSocketHandler.broadcastMessage pour le statut caméra
-        String messageJson = convertToJson(message);
         webSocketHandler.broadcastMessage(messageJson);
         log.debug("Statut caméra diffusé via WebSocketHandler: {} - {}", cameraId, status);
 
-        // ✅ Également via SimpMessagingTemplate pour les clients STOMP
         CompletableFuture<Void> future = AsyncUtils.runAsync(
-                () -> messagingTemplate.convertAndSend(Constants.WS_TOPIC_CAMERAS, message),
+                () -> messagingTemplate.convertAndSend(Constants.WS_TOPIC_CAMERAS, wsMessage),
                 notificationExecutor,
                 "Diffusion statut caméra " + cameraId
         );
@@ -136,12 +158,155 @@ public class WebSocketServiceImpl implements WebSocketService {
 
     public void registerUserConnection(String username) {
         connectedUsers.put(username, true);
+
+        // ✅ Utilisation de WebSocketMessage avec USER_CONNECTED
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.USER_CONNECTED)
+                .content(username)
+                .timestamp(LocalDateTime.now())
+                .build();
+        webSocketHandler.broadcastMessage(convertToJson(wsMessage));
+
         log.debug("Utilisateur connecté: {}", username);
     }
 
     public void unregisterUserConnection(String username) {
         connectedUsers.remove(username);
+
+        // ✅ Utilisation de WebSocketMessage avec USER_DISCONNECTED
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.USER_DISCONNECTED)
+                .content(username)
+                .timestamp(LocalDateTime.now())
+                .build();
+        webSocketHandler.broadcastMessage(convertToJson(wsMessage));
+
         log.debug("Utilisateur déconnecté: {}", username);
+    }
+
+    // ==================== NOUVELLES MÉTHODES UTILISANT WebSocketMessage ====================
+
+    /**
+     * ✅ Utilisation de WebSocketMessage.ping()
+     */
+    public void sendPing() {
+        WebSocketMessage pingMessage = WebSocketMessage.ping();
+        webSocketHandler.broadcastMessage(convertToJson(pingMessage));
+        log.debug("Ping envoyé à toutes les sessions");
+    }
+
+    /**
+     * ✅ Utilisation de WebSocketMessage.pong()
+     */
+    public void sendPong() {
+        WebSocketMessage pongMessage = WebSocketMessage.pong();
+        webSocketHandler.broadcastMessage(convertToJson(pongMessage));
+        log.debug("Pong envoyé à toutes les sessions");
+    }
+
+    /**
+     * ✅ Utilisation de WebSocketMessage.systemNotification()
+     */
+    public void sendSystemNotification(String content, String recipient) {
+        WebSocketMessage notification = WebSocketMessage.systemNotification(content, recipient);
+        webSocketHandler.broadcastMessage(convertToJson(notification));
+        log.debug("Notification système envoyée à {}: {}", recipient, content);
+    }
+
+    /**
+     * ✅ Utilisation de WebSocketMessage avec ALERT_UPDATED
+     */
+    public void broadcastAlertUpdated(String alertJson) {
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.ALERT_UPDATED)
+                .content(alertJson)
+                .timestamp(LocalDateTime.now())
+                .build();
+        webSocketHandler.broadcastMessage(convertToJson(wsMessage));
+    }
+
+    /**
+     * ✅ Utilisation de WebSocketMessage avec ALERT_RESOLVED
+     */
+    public void broadcastAlertResolved(String alertJson) {
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.ALERT_RESOLVED)
+                .content(alertJson)
+                .timestamp(LocalDateTime.now())
+                .build();
+        webSocketHandler.broadcastMessage(convertToJson(wsMessage));
+    }
+
+    /**
+     * ✅ Utilisation de WebSocketMessage avec ALERT_ESCALATED
+     */
+    public void broadcastAlertEscalated(String alertJson) {
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.ALERT_ESCALATED)
+                .content(alertJson)
+                .timestamp(LocalDateTime.now())
+                .build();
+        webSocketHandler.broadcastMessage(convertToJson(wsMessage));
+    }
+
+    /**
+     * ✅ Utilisation de WebSocketMessage avec CAMERA_ADDED
+     */
+    public void broadcastCameraAdded(String cameraJson) {
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.CAMERA_ADDED)
+                .content(cameraJson)
+                .timestamp(LocalDateTime.now())
+                .build();
+        webSocketHandler.broadcastMessage(convertToJson(wsMessage));
+    }
+
+    /**
+     * ✅ Utilisation de WebSocketMessage avec CAMERA_REMOVED
+     */
+    public void broadcastCameraRemoved(String cameraJson) {
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.CAMERA_REMOVED)
+                .content(cameraJson)
+                .timestamp(LocalDateTime.now())
+                .build();
+        webSocketHandler.broadcastMessage(convertToJson(wsMessage));
+    }
+
+    /**
+     * ✅ Utilisation de WebSocketMessage avec ZONE_UPDATED
+     */
+    public void broadcastZoneUpdate(String zoneJson) {
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.ZONE_UPDATED)
+                .content(zoneJson)
+                .timestamp(LocalDateTime.now())
+                .build();
+        webSocketHandler.broadcastMessage(convertToJson(wsMessage));
+    }
+
+    /**
+     * ✅ Utilisation de WebSocketMessage avec RULE_TRIGGERED
+     */
+    public void broadcastRuleTriggered(String ruleJson) {
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.RULE_TRIGGERED)
+                .content(ruleJson)
+                .timestamp(LocalDateTime.now())
+                .build();
+        webSocketHandler.broadcastMessage(convertToJson(wsMessage));
+    }
+
+    /**
+     * ✅ Utilisation de WebSocketMessage avec ERROR
+     */
+    public void broadcastError(String errorMessage) {
+        WebSocketMessage wsMessage = WebSocketMessage.builder()
+                .type(WebSocketMessage.MessageType.ERROR)
+                .content(errorMessage)
+                .timestamp(LocalDateTime.now())
+                .build();
+        webSocketHandler.broadcastMessage(convertToJson(wsMessage));
     }
 
     /**
